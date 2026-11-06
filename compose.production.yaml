@@ -29,7 +29,7 @@ services:
     networks: [database]
     mem_limit: 768m
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U causelume_owner -d causelume"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "causelume_owner", "-d", "causelume"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -178,7 +178,7 @@ services:
     networks: [restore]
     mem_limit: 1536m
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U causelume_owner -d causelume"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "causelume_owner", "-d", "causelume"]
       interval: 3s
       retries: 20
 

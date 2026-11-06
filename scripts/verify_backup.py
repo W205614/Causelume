@@ -21,7 +21,8 @@ def main():
         "-e","POSTGRES_PASSWORD",PG,env=env,stdout=subprocess.DEVNULL)
     try:
         for _ in range(60):
-            if subprocess.run(["docker","exec",name,"pg_isready","-U","postgres"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0: break
+            # The entrypoint's initialization server listens on a socket only.
+            if subprocess.run(["docker","exec",name,"pg_isready","-h","127.0.0.1","-U","postgres"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0: break
             time.sleep(.5)
         else: raise TimeoutError("Postgres not ready")
         sql="CREATE TABLE recovery_probe(id bigint primary key,body text); INSERT INTO recovery_probe VALUES(42,'synthetic-restore-evidence');"
