@@ -62,9 +62,9 @@ class InvestigationTest {
     }
     JsonNode await(long ticketId,long taskId) throws Exception {
         for(int i=0;i<100;i++) {
-            for(var task : ok("tasks?ticketId="+ticketId,null)) {
-                if(task.get("id").asLong()==taskId && java.util.Set.of("SUCCEEDED","FAILED").contains(task.get("status").asString())) return task;
-            }
+            var task = ok("tasks/"+taskId,null);
+            assertEquals(ticketId,task.get("ticketId").asLong());
+            if (java.util.Set.of("SUCCEEDED","FAILED").contains(task.get("status").asString())) return task;
             Thread.sleep(100);
         }
         throw new AssertionError("investigation did not finish");

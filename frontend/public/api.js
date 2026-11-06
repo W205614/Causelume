@@ -24,5 +24,11 @@ export async function request(path, body) {
       { status: response.status },
     );
   if (json === null) throw Error("服务返回了无法识别的数据。");
+  const cursor = response.headers.get("X-Next-Cursor");
+  if (cursor && ["/users", "/services"].includes(path.split("?")[0])) {
+    const base = path.split("?")[0];
+    const rest = await request(base + "?afterId=" + encodeURIComponent(cursor));
+    return json.concat(rest);
+  }
   return json;
 }

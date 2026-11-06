@@ -23,6 +23,7 @@ test("模拟登录、各主导航、过滤及权限状态", async ({ page }) => 
   await expect(page.getByText("权限不足")).toBeVisible();
   await page.getByRole("link", { name: "事件与工单", exact: true }).click();
   await page.getByLabel("搜索工单").fill("no-match");
+  await page.getByRole("button", { name: "筛选", exact: true }).click();
   await expect(page.getByText("暂无记录")).toBeVisible();
   await page.getByRole("button", { name: "退出登录" }).click();
   await page.getByLabel("账号", { exact: true }).fill("operator");
@@ -48,7 +49,7 @@ test("人工建单、派工、模拟调查、反馈、验证和复盘", async ({
   await page.getByLabel("核查结果").fill("已复核样本");
   await page.getByRole("button", { name: "确认", exact: true }).click();
   await expect(page.getByText("已复核样本")).toBeVisible();
-  await page.getByRole("link", { name: "工单 #2" }).click();
+  await page.getByRole("link", { name: /工单 #\d+/ }).click();
   for (const [action, field] of [
     ["验证恢复", "恢复验证依据"],
     ["关闭并复盘", "复盘记录"],

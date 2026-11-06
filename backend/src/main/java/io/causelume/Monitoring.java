@@ -26,7 +26,7 @@ class Monitoring {
         store.audit(actor.username(),"CREATE_SERVICE",id);
         return store.one("select * from services where id=?",id);
     }
-    @GetMapping("/alerts") Object alerts() { return store.rows("select * from alerts order by id desc"); }
+    @GetMapping("/alerts") Object alerts() { return store.rows("select * from alerts order by id desc limit 100"); }
     @PostMapping("/alerts") @Transactional
     public Object alert(@RequestBody Alert input,HttpServletRequest req) {
         store.one("select id from services where id=?",input.serviceId);

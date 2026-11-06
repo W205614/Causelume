@@ -85,7 +85,7 @@ def main():
         deadline = time.monotonic() + 115
         while task["status"] in ("PENDING", "QUEUED", "RUNNING") and time.monotonic() < deadline:
             time.sleep(.5)
-            task = next(t for t in api.call(f"/api/tasks?ticketId={ticket['id']}") if t["id"] == task["id"])
+            task = api.call(f"/api/tasks/{task['id']}")
         assert task["status"] == "SUCCEEDED", (task["status"], task.get("error"))
         assert task["mode"] == args.expect_mode, task["mode"]
         evidence = task["result"]["evidence"]

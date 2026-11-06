@@ -14,7 +14,7 @@ import {
   tasksPage,
   detail,
   taskDetail,
-  ticketTable,
+  taskRows,
 } from "./views.js";
 const root = document.querySelector("#app"),
   dialog = document.querySelector("#dialog");
@@ -23,7 +23,6 @@ let me,
   ticket,
   task,
   epoch = 0;
-const route = () => location.hash.slice(1).split("/");
 const mode = () =>
   '<span class="mode ' +
   (demo ? "warning" : "") +
@@ -66,7 +65,9 @@ function shell(page) {
         ([key, title]) =>
           '<a href="#' +
           key +
-          '" class="' +
+          '" ' +
+          (page === key ? 'aria-current="page" ' : "") +
+          'class="' +
           (page === key ? "active" : "") +
           '">' +
           icon(key) +
@@ -84,81 +85,168 @@ function shell(page) {
     mode() +
     '</div><main><div class="progress">正在加载…</div></main></div></div>';
 }
-async function render() {
-  const version = ++epoch;
-  if (dialog.open) dialog.close();
-  if (!me) {
-    login();
-    return;
-  }
-  const [raw, id] = route(),
-    page = raw || "overview";
-  shell(page);
-  const main = root.querySelector("main");
-  try {
-    const needs = {
-      overview: ["tickets", "services", "alerts", "tasks"],
-      services: ["services"],
-      alerts: ["alerts", "tickets", "services"],
-      tickets: ["tickets", "services", "users", "tasks"],
-      tasks: ["tasks", "tickets"],
-      users: ["users"],
-    };
-    const names = needs[page];
-    if (!names) throw Error("页面不存在");
-    if (!demo && page === "users" && me.role === "ADMIN") names.push("audit");
-    const rows = await Promise.all(names.map((n) => request("/" + n)));
-    const t =
-      page === "tickets" && id
-        ? await request("/tickets/" + encodeURIComponent(id))
-        : null;
-    if (epoch !== version) return;
-    data = Object.fromEntries(names.map((n, i) => [n, rows[i]]));
-    data.admin = me.role === "ADMIN";
-    data.actorId = me.id;
-    ticket = t;
-    task =
-      page === "tasks" && id
-        ? data.tasks.find((j) => String(j.id) === id)
-        : null;
-    if (page === "tasks" && id && !task) throw Error("调查任务不存在");
-    const view = {
-      overview,
-      services: servicesPage,
-      alerts: alertsPage,
-      tickets: ticketsPage,
-      tasks: tasksPage,
-      users: usersPage,
-    }[page];
-    if (!view) throw Error("页面不存在");
-    if (page === "services" && id) {
-      const service = data.services.find((s) => String(s.id) === id);
+async function loadView(page, id, params) {
+  const state = { admin: me.role === "ADMIN", actorId: me.id, params };
+  const list = async (name) =>
+    request("/" + name + "/page?" + params.toString());
+  switch (page) {
+    case "overview":
+      return { ...state, summary: await request("/overview") };
+    case "services": {
+      const services = await request("/services");
+      if (!id) return { ...state, services };
+      const service = services.find((s) => String(s.id) === id);
       if (!service) throw Error("服务不存在");
       const [metrics, logs] = await Promise.all(
         ["metrics", "logs"].map((key) =>
           request("/services/" + service.id + "/" + key),
         ),
       );
-      if (version === epoch)
-        main.innerHTML = observations(service, metrics, logs);
+      return { ...state, service, metrics, logs };
+    }
+    case "alerts": {
+      const [page, services] = await Promise.all([
+        list("alerts"),
+        request("/services"),
+      ]);
+      return { ...state, page, services, alerts: page.items };
+    }
+    case "tickets": {
+      const [services, users] = await Promise.all([
+        request("/services"),
+        request("/users"),
+      ]);
+      if (!id)
+        return { ...state, services, users, page: await list("tickets") };
+      const [ticket, related] = await Promise.all([
+        request("/tickets/" + encodeURIComponent(id)),
+        request("/tasks/page?ticketId=" + encodeURIComponent(id) + "&size=20"),
+      ]);
+      return {
+        ...state,
+        services,
+        users,
+        ticket,
+        tasks: related.items,
+        relatedTotal: related.total,
+      };
+    }
+    case "tasks": {
+      if (!id) {
+        const [page, services] = await Promise.all([
+          list("tasks"),
+          request("/services"),
+        ]);
+        return { ...state, page, services };
+      }
+      const task = await request("/tasks/" + encodeURIComponent(id));
+      const ticket = await request("/tickets/" + task.ticketId);
+      return { ...state, task, tickets: [ticket] };
+    }
+    case "users": {
+      const [users, audit] = await Promise.all([
+        request("/users"),
+        !demo && state.admin ? request("/audit") : null,
+      ]);
+      return { ...state, users, audit };
+    }
+    default:
+      throw Error("页面不存在");
+  }
+}
+let poll;
+function scheduleUpdates(page, id, params, version) {
+  clearTimeout(poll);
+  if (
+    page !== "tasks" ||
+    !(id ? [task] : data.page.items).some((t) =>
+      ["PENDING", "RUNNING"].includes(t.status),
+    )
+  )
+    return;
+  poll = setTimeout(async () => {
+    if (epoch !== version) return;
+    if (document.hidden || dialog.open) {
+      scheduleUpdates(page, id, params, version);
       return;
     }
+    try {
+      const fresh = id
+        ? await request("/tasks/" + encodeURIComponent(id))
+        : await request("/tasks/page?" + params);
+      if (epoch !== version) return;
+      if (id) {
+        task = fresh;
+        data.task = fresh;
+        document.querySelector("main").innerHTML = taskDetail(task, data);
+      } else {
+        data.page = fresh;
+        document.querySelector("#task-list").innerHTML = taskRows(data);
+      }
+      scheduleUpdates(page, id, params, version);
+    } catch (err) {
+      if (epoch === version) {
+        if (err.status === 401) {
+          me = null;
+          await render();
+          return;
+        }
+        const message = document.createElement("p");
+        message.className = "retry";
+        message.setAttribute("role", "alert");
+        message.textContent = "自动刷新暂停：" + err.message + "。请手动刷新。";
+        document.querySelector("main").prepend(message);
+      }
+    }
+  }, 5000);
+}
+async function render() {
+  clearTimeout(poll);
+  const version = ++epoch;
+  if (dialog.open) dialog.close();
+  if (!me) {
+    login();
+    return;
+  }
+  const [path, query = ""] = location.hash.slice(1).split("?"),
+    [raw, id] = path.split("/"),
+    page = raw || "overview",
+    params = new URLSearchParams(query);
+  shell(page);
+  const main = root.querySelector("main");
+  try {
+    const fresh = await loadView(page, id, params);
+    if (epoch !== version) return;
+    data = fresh;
+    ticket = data.ticket;
+    task = data.task;
+    const views = {
+      overview,
+      services: servicesPage,
+      alerts: alertsPage,
+      tickets: ticketsPage,
+      tasks: tasksPage,
+      users: usersPage,
+    };
     main.innerHTML = ticket
       ? detail(ticket, data)
       : task
         ? taskDetail(task, data)
-        : view(data);
-    const filter = document.querySelector("#filter");
-    if (filter)
-      filter.oninput = () => {
-        const key = filter.value.trim().toLowerCase();
-        document.querySelector("#matches").innerHTML = ticketTable(
-          data.tickets.filter((t) =>
-            (t.title + " " + t.id).toLowerCase().includes(key),
-          ),
-          data.services,
-        );
+        : data.service
+          ? observations(data.service, data.metrics, data.logs)
+          : views[page](data);
+    const filters = main.querySelector("form[data-filter]");
+    if (filters)
+      filters.onsubmit = (e) => {
+        e.preventDefault();
+        const query = new URLSearchParams();
+        for (const [key, value] of new FormData(filters))
+          if (value.trim()) query.set(key, value.trim());
+        if (page === "tasks" && params.has("ticketId"))
+          query.set("ticketId", params.get("ticketId"));
+        location.hash = page + (query.size ? "?" + query : "");
       };
+    scheduleUpdates(page, id, params, version);
   } catch (err) {
     if (version !== epoch) return;
     if (err.status === 401) {
@@ -310,6 +398,17 @@ root.onclick = async (e) => {
       chosen,
     );
   if (op === "newTicket" || op === "fromAlert") {
+    if (!data.services) {
+      const opening = epoch;
+      try {
+        const services = await request("/services");
+        if (opening !== epoch || dialog.open) return;
+        data.services = services;
+      } catch (err) {
+        if (opening === epoch) reportLate("读取服务失败：" + err.message);
+        return;
+      }
+    }
     const a =
         op === "fromAlert"
           ? data.alerts.find((a) => String(a.id) === arg)

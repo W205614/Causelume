@@ -63,7 +63,82 @@ const tickets = [
     ],
   },
 ];
-const tasks = [];
+const sampleTime = (minutes) =>
+  new Date(Date.now() - minutes * 60000).toISOString();
+const trace = (action, actor, note, minutes) => ({
+  action,
+  actor,
+  note,
+  createdAt: sampleTime(minutes),
+});
+tickets[0].createdAt = sampleTime(42);
+tickets[0].status = "PROCESSING";
+tickets[0].assigneeId = 2;
+tickets[0].version = 3;
+tickets[0].timeline = [
+  trace("CREATE", "admin", "根据结算接口持续 503 的告警创建工单。", 42),
+  trace("ASSIGN", "admin", "已分派给当班运维，优先核查结算依赖。", 38),
+  trace("START", "operator", "在示例环境复现 503，开始调查 checkout。", 31),
+  trace("NOTE", "operator", "已关联只读调查结果，等待人工确认连接池配置。", 19),
+];
+for (const [id, serviceId, title, status, minutes] of [
+  [2, 2, "支付任务队列积压", "ASSIGNED", 75],
+  [3, 3, "网关请求延迟升高", "VERIFIED", 130],
+  [4, 1, "结算服务探测超时", "CLOSED", 194],
+]) {
+  tickets.push({
+    id,
+    serviceId,
+    title,
+    status,
+    version: 1,
+    assigneeId: 2,
+    createdAt: sampleTime(minutes),
+    timeline: [
+      trace("CREATE", "operator", "从服务巡检记录创建示例工单。", minutes),
+    ],
+  });
+}
+alerts.push({
+  id: 3,
+  serviceId: 3,
+  source: "gateway-probe",
+  externalId: "edge-rt",
+  severity: "INFO",
+  title: "入口探测延迟超过阈值",
+  occurredAt: sampleTime(56),
+});
+const tasks = [
+  {
+    id: 1,
+    ticketId: 1,
+    status: "SUCCEEDED",
+    mode: "模拟数据",
+    createdAt: sampleTime(27),
+    startedAt: sampleTime(26),
+    finishedAt: sampleTime(25),
+    summary: "连接池无可用许可，结算请求返回 503。",
+    feedback: "已核对模拟请求日志与错误计数，下一步检查池容量。",
+    result: {
+      sampledAt: sampleTime(26),
+      snapshotId: "00000000000000000000000000000001",
+      evidence: [
+        {
+          source: "checkout:/metrics",
+          detail: "模拟采样窗口共收到 18 次请求，其中 6 次返回 5xx。",
+        },
+        {
+          source: "checkout:/logs",
+          detail: "request=demo-checkout-031 status=503 event=pool_exhausted",
+        },
+      ],
+      possibleCause: "连接池无可用许可，结算请求在获取连接时失败。",
+      uncertainty: "现有日志无法区分连接长期占用与连接池容量设置过小。",
+      recommendation:
+        "人工比对连接占用时间和池容量，恢复后重新请求 /checkout 验证。",
+    },
+  },
+];
 const passwords = new Map([
   ["admin", "demo"],
   ["operator", "demo"],
@@ -92,9 +167,82 @@ export async function request(path, body) {
     me = null;
     return;
   }
-  const [group, id, operation] = path.slice(1).split("/");
+  const [pathname, query] = path.slice(1).split("?");
+  const [group, id, operation] = pathname.split("/");
+  const serviceName = (row) =>
+    services.find((s) => s.id === row.serviceId)?.name;
+  if (group === "overview") {
+    const count = (rows, key, states) =>
+      Object.fromEntries(
+        states.map((s) => [s, rows.filter((r) => r[key] === s).length]),
+      );
+    return {
+      openTickets: tickets.filter((t) => t.status !== "CLOSED").length,
+      criticalAlerts: alerts.filter((a) => a.severity === "CRITICAL").length,
+      activeTasks: tasks.filter((t) =>
+        ["PENDING", "RUNNING"].includes(t.status),
+      ).length,
+      services: services.length,
+      taskCounts: count(tasks, "status", [
+        "PENDING",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+      ]),
+      recentTickets: tickets
+        .slice(0, 5)
+        .map((t) => ({ ...t, serviceName: serviceName(t) })),
+      recentAlerts: alerts
+        .slice(0, 5)
+        .map((a) => ({ ...a, serviceName: serviceName(a) })),
+    };
+  }
   const collection = { services, users, alerts, tickets, tasks }[group];
   if (!collection) throw Error("入口不存在");
+  if (id === "page") {
+    const params = new URLSearchParams(query),
+      page = Number(params.get("page") || 1),
+      size = Number(params.get("size") || 20);
+    const filtered = collection.filter(
+      (row) =>
+        ["status", "severity", "serviceId", "assigneeId", "ticketId"].every(
+          (key) => {
+            if (!params.has(key)) return true;
+            const value =
+              group === "tasks" && key === "serviceId"
+                ? tickets.find((t) => t.id === row.ticketId)?.serviceId
+                : row[key];
+            return String(value) === params.get(key);
+          },
+        ) &&
+        (!params.get("q") ||
+          (row.title + " " + row.id)
+            .toLowerCase()
+            .includes(params.get("q").toLowerCase())),
+    );
+    const items = filtered.slice((page - 1) * size, page * size).map((row) => {
+      const ticket =
+        group === "tasks" ? tickets.find((t) => t.id === row.ticketId) : row;
+      if (group === "tasks")
+        return {
+          id: row.id,
+          ticketId: row.ticketId,
+          status: row.status,
+          mode: row.mode,
+          summary: row.summary,
+          createdAt: row.createdAt,
+          serviceName: serviceName(ticket),
+          ticketTitle: ticket.title,
+        };
+      return {
+        ...row,
+        serviceName: serviceName(row),
+        assigneeName: users.find((u) => u.id === row.assigneeId)?.username,
+        ticketId: tickets.find((t) => t.alertId === row.id)?.id,
+      };
+    });
+    return { page, size, items, total: filtered.length };
+  }
   const item = id && collection.find((x) => x.id === Number(id));
   if (id && !item) throw Error("记录不存在");
   if (!body) return structuredClone(item || collection);

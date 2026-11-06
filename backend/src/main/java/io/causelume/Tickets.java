@@ -18,7 +18,7 @@ class Tickets {
     record NewTicket(long serviceId,Long alertId,String title,UUID requestId) {}
     record Action(Long version,String action,Long assigneeId,String note) {}
 
-    @GetMapping Object list() { return store.rows("select "+COLUMNS+" from tickets order by id desc"); }
+    @GetMapping Object list() { return store.rows("select "+COLUMNS+" from tickets order by id desc limit 100"); }
     @GetMapping("/{id}") @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public Map<String,Object> detail(@PathVariable long id) {
         var row=store.one("select "+COLUMNS+" from tickets where id=?",id);

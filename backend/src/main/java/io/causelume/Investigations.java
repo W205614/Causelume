@@ -23,16 +23,17 @@ class Investigations {
 
     @GetMapping
     List<Map<String,Object>> list(@RequestParam(required=false) Long ticketId) {
-        var rows = ticketId == null ? store.rows(SELECT+" order by id desc")
-                : store.rows(SELECT+" where ticket_id=? order by id desc", ticketId);
-        return rows.stream().map(this::result).toList();
+        String fields = "select id,ticket_id,status,mode,created_at,started_at,finished_at,error_code,coalesce(summary,left(error,240)) as summary from tasks";
+        return ticketId == null ? store.rows(fields+" order by id desc limit 100")
+                : store.rows(fields+" where ticket_id=? order by id desc limit 100", ticketId);
     }
     private Map<String,Object> result(Map<String,Object> task) {
         String analysis = (String)task.remove("analysis");
         task.put("result", analysis == null ? null : json.readTree(analysis));
         return task;
     }
-    Map<String,Object> get(long id) {
+    @GetMapping("/{id}")
+    Map<String,Object> get(@PathVariable long id) {
         return result(store.one(SELECT+" where id=?",id));
     }
 

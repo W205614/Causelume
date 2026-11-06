@@ -67,8 +67,8 @@ class InvestigationWorker {
             failed(id,"WORKER_ERROR","调查执行异常，请由管理员核查");
             return;
         }
-        store.db.update("update tasks set status='SUCCEEDED',mode=?,analysis=?,finished_at=current_timestamp"+ACTIVE,
-                result.get("mode").asString(),result.toString(),id);
+        store.db.update("update tasks set status='SUCCEEDED',mode=?,analysis=?,summary=left(?,240),finished_at=current_timestamp"+ACTIVE,
+                result.get("mode").asString(),result.toString(),result.get("possibleCause").asString(),id);
     }
 
     private void failed(long id,String code,String message) {
