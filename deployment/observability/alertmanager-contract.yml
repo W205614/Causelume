@@ -1,0 +1,18 @@
+services:
+  alertmanager:
+    image: prom/alertmanager@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
+    command: ["--config.file=/etc/alertmanager/config.yml", "--storage.path=/alertmanager", "--cluster.listen-address="]
+    secrets: [ALERTMANAGER_TOKEN]
+    volumes: ["./alertmanager.yml:/etc/alertmanager/config.yml:ro"]
+    tmpfs: ["/alertmanager:mode=1777"]
+    networks: [contract]
+  app:
+    image: python:3.13-slim@sha256:09a17cad02668ae61ece136b4fd36ac3849e14f670ebedb637ea3e15580525bc
+    command: ["python", "-u", "/contract/verify_alertmanager.py", "--receiver"]
+    volumes: ["../../agent/verify_alertmanager.py:/contract/verify_alertmanager.py:ro"]
+    networks: [contract]
+networks:
+  contract: {internal: true}
+secrets:
+  ALERTMANAGER_TOKEN:
+    environment: CONTRACT_ALERT_TOKEN

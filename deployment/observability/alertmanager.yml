@@ -1,0 +1,16 @@
+route:
+  receiver: causelume
+  group_by: [alertname, service, environment]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 4h
+receivers:
+  - name: causelume
+    webhook_configs:
+      - url: http://app:8080/api/integrations/alertmanager/primary
+        max_alerts: 100
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/ALERTMANAGER_TOKEN

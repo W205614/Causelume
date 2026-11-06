@@ -1,58 +1,56 @@
-# 调查服务与可复现故障
+# 调查、证据与模型调用
 
-Java 创建任务并保存状态，通过内网调用 investigator。调查只访问已登记的 checkout。checkout 由 Waitress 提供 HTTP 服务，使用容量为一的许可池模拟一个受限依赖。人工启用故障会占住该许可，随后访问 `GET /checkout` 会实际返回 HTTP 503，并留下带请求 ID、时间、状态和事件名的日志。人工解除占用后，需要重新请求才能产生恢复证据。
+Java 绑定服务的数据源、`service` 和 `environment` 标签，并创建调查任务。Python 向管理员已登记的地址发起只读查询，冻结采样结果，再交给离线规则或独立 HolmesGPT 分析。每份成功结果都有 `snapshotId` 和 UTC `sampledAt`，供工单查看和审计。
 
-## 接口
+## 内部接口
 
-| 接口 | 身份 | 结果 |
-|---|---|---|
-| `POST /investigate` | `Bearer AGENT_TOKEN` | 输入 `{"taskId":"123","service":"checkout"}`。成功返回任务 ID、模式、快照标识 `snapshotId`、UTC 采样时间 `sampledAt`、证据数组、可能原因、不确定性和人工建议 |
-| `GET /metrics`、`GET /logs` | `Bearer EVIDENCE_TOKEN` | 当前窗口样本，最多 50 个请求。切换故障状态、重启演示服务都会开启新窗口 |
-| `GET /snapshot` | `Bearer EVIDENCE_TOKEN` | 在同一把锁下读取窗口请求数、5xx 数和最近一条失败日志，并生成唯一快照 ID。每次调查只采样一次 |
-| `POST /control` | `Bearer DEMO_CONTROL_TOKEN` | `{"fault":true}` 注入连接池故障，`false` 解除 |
-| `GET /checkout` | 演示客户端 | 发起一次业务请求，返回 HTTP 200 或 503 |
-| `GET /health` | 健康探针 | 服务进程可用。业务恢复应另行访问 `/checkout` 验证 |
+所有目录、检测和调查接口以 `Authorization: Bearer AGENT_TOKEN` 认证。`AGENT_TOKEN_FILE` 和 `HOLMES_API_KEY_FILE` 可替代对应环境变量。接口不会返回数据源地址、文件路径或凭据。
 
-只有 `/investigate` 与自身的 `/health` 由 investigator 提供。其余接口属于 checkout。证据格式为 `{"source":"checkout:/logs","detail":"时间、请求 ID、HTTP 状态与事件"}`。无请求样本或未登记服务返回 422；认证失败 401，格式错误 400，依赖错误 502，依赖超时 504。错误体为 `{"error":"原因"}`。服务端只发起固定目标的请求，拒绝重定向，不接受用户自定义网址或命令。
+| 方法与地址 | 请求或结果 |
+|---|---|
+| `GET /health` | 无凭据，仅检查服务进程 |
+| `GET /sources` | `{"sources":[{"id":"prom-loki","name":"…","type":"prometheus-loki"}]}` |
+| `GET /sources/{id}/check?service=example-service&environment=local` | `sourceId`、`available`、每个来源的 `source/status/detail`。检测证明查询可用；历史窗口有无样本由调查返回 |
+| `POST /investigate` | `taskId,sourceId,service,environment,windowStart,windowEnd,allowModel`。时间采用带时区的 ISO 8601 格式，窗口大于零且不超过 24 小时 |
+| 调查结果 | `taskId,service,sourceId,mode,modelExecution,snapshotId,sampledAt,evidence,possibleCause,uncertainty,recommendation,usage`；真实源另返回 `environment,windowStart,windowEnd,completeness,observations` |
 
-## 两种运行模式
+生产的只读注册文件由 `SOURCE_REGISTRY_FILE` 指定。修改文件后重新创建 agent。`deployment/observability/sources.json` 给出本项目内部示例。外部数据源可分别在 `prometheus` 或 `loki` 节点增加 `"secretFile":"/run/secrets/reader_token"` 以发送 Bearer 凭据；请求运行时读取文件，路径限定在 `SOURCE_SECRET_DIR`（默认 `/run/secrets`）之下。注册文件只接受固定 HTTP(S) origin。API 只接受登记 ID、时间及受限标签字符，查询模板在服务端生成，拒绝重定向，不使用环境代理。部署者须保护注册文件、内部 DNS，并对外部数据源施加只读角色和网络出口限制。业务 API 不能写入注册表。生产内置源使用查询网关执行 GET 路径白名单，Python 与 Loki/Prometheus 的采集网络隔离。
 
-**offline** 在一次原子快照内读取指标，并按错误计数选择是否引用该窗口最近的失败日志。规则只在出现 `pool_exhausted` 时提示连接池方向。窗口内没有 5xx 时，报告写明当前观察范围。切换故障状态和后续访问不会改变已取得的快照。
+## 真实源与覆盖范围
 
-**holmes** 先核验 `GET /api/info?detail=full` 的鉴权和工具白名单，再向 `POST /api/chat` 提交本次快照摘要。两个无参数工具分别返回该次采样的计数和最近一条错误日志。应用把精简 JSON 视图编码在本次 HTTP 请求的独立头部，经 Holmes 的 request context 传入。工具只解码自身视图，无访问 checkout 所需的网络凭据、无全局快照缓存，模型不能指定其他调查的 ID。工具参数插入 shell 之前先 URL 编码，固定的 Python 命令只接受十六进制负载。[Holmes 0.46.0 请求头上下文](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/docs/data-sources/header-propagation.md)
+- Prometheus 在窗口结束时评估固定 PromQL，以同一窗口内的 `up` 最小值及 Spring/Micrometer `http_server_requests_seconds_{count,sum}` 计数器增量计算请求量、5xx 增量和平均响应时间。计数器增量采用 Prometheus 外推语义，可能是小数。聚合平均不能解释尾延迟。未产生过 5xx 标签时该信号显示缺失。[Prometheus 查询接口](https://prometheus.io/docs/prometheus/latest/querying/api/)
+- Loki 使用相同的标签和毫秒分辨率窗口 `(start,end]`，按时间倒序请求 4 条、最多保留 3 条，额外一条用于判定截断。仅允许受控事件枚举、日志级别、HTTP 状态、毫秒耗时和时间戳进入冻结结果；其他 JSON 字段、自由文本、流标签和未知事件内容一律移除。用户可以看到 `unclassified`。原始日志仍受源端 Loki 权限和保留设置约束。[Loki 查询接口](https://grafana.com/docs/loki/latest/reference/loki-http-api/)
+- `observations.metrics`、`observations.logs` 各自保存实际查询、窗口、来源、采集时刻、状态、截断标志、样本和完整性。Prometheus 另列 `missingSignals`。空窗口、源端异常、截断、未结束窗口、指标缺失会限制结论。查询均在本次任务中冻结；在途日志仍可能稍后进入同一历史窗口。两套存储没有跨库事务快照。
+- 所有来源都没有样本时保留观测记录，不请求模型。已授权的 Holmes 任务此时显示 `modelExecution=skipped_no_evidence` 并报告实际模型用量 0。单个来源失败时保存另一来源的数据和 `partial`。
 
-初始证据的逻辑来源为 `checkout:/metrics` 和 `checkout:/logs`，实际由一次 `/snapshot` 提供。每次成功工具调用另存一项证据，来源为 `holmes:checkout_metrics` 或 `holmes:checkout_logs`，内容包括上游调用 ID 与实际返回的完整只读视图。应用逐次核对返回内容与本次快照；发生错配、工具报错或超限时，整项调查失败。模型回复只写入可能原因、不确定性与人工建议三个字段。页面可用顶层 `snapshotId`、`sampledAt` 关联证据；升级前的历史记录可能缺少这两个字段。[上游返回结构](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/holmes/core/models.py)
+## 模型与费用
 
-调查输入上限为 4 KiB，快照响应 4 KiB、工具配置响应 128 KiB、模型服务总响应 512 KiB。每次最多持久化 2 条采样证据与 8 次工具查询结果，每项分析正文限 2000 个 Unicode 码点。观测与配置请求各限时 3 秒，模型读取超时为 80 秒。读取连接超时、无效数据和异常响应分别向 Java 报告，不发起应用级自动重试。
+`AGENT_MODE=offline` 使用本地规则。启用 `holmes` 还要求每次请求由 Java 明确传入 `allowModel:true`。缺少授权立即返回 422，在读取任何日志或联系模型前终止。调用目标固定为独立 HolmesGPT 0.46.0。其唯一启用的工具集 `causelume_observations` 只提供只读的 `frozen_metrics` 与 `frozen_logs`。
 
-Holmes 使用 Apache-2.0 上游镜像 `robustadev/holmes:0.46.0`，Docker Hub 在 2026-11-06 报告该标签大小约 293 MB。项目通过独立 HTTP 服务复用上游框架。启用快照模式时使用 `holmes-snapshot.yaml`，仅 agent 与业务后端使用证据读取令牌访问 checkout，故障控制令牌由 checkout 核验。模型进程只需鉴权与模型凭据。[上游许可证](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/LICENSE) · [镜像元数据](https://hub.docker.com/v2/repositories/robustadev/holmes/tags/0.46.0)
+应用先核验已认证的 `GET /api/info?detail=full`，再调用 `POST /api/chat`。两份结构化视图随该次 HTTP 请求以 Base64URL 传输，每份 UTF-8 原文最多 1800 字节，任务摘要最多 6144 字节。工具只解码请求内的冻结视图，没有访问源端的令牌或动态 URL。工具头在 shell 渲染前通过 URL 编码，解码时严格检查 Base64 字符。每次成功调用保存来源、调用 ID 与完整输出，且逐字核对实际返回值与本次快照。来源或内容不匹配会使调查失败。[上游头部传递](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/docs/data-sources/header-propagation.md) · [工具返回契约](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/holmes/core/models.py)
 
-模型为 `gpt-6.1-sol`，官方服务地址为 `https://api.openai.com/v1`。Holmes 配置采用 `openai/gpt-6.1-sol`，并向其进程设置 `LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES=true`。Holmes 锁定的 LiteLLM 1.103.5 将带函数工具的 completion 调用转换为 `POST /v1/responses`。真实调用需要用户在服务端配置 `OPENAI_API_KEY` 并承担实际请求费用。[OpenAI 模型文档](https://developers.openai.com/api/docs/models/gpt-6.1-sol) · [Holmes 依赖锁](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/poetry.lock) · [LiteLLM 路由实现](https://github.com/BerriAI/litellm/blob/v1.103.5/litellm/main.py)
+模型配置使用 `holmes-observations.yaml`。`gpt-6.1-sol` 通过 `LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES=true` 走官方 Responses API。生产部署使用 `max_steps: 4`、`OVERRIDE_MAX_CONTENT_SIZE=16384`、`OVERRIDE_MAX_OUTPUT_TOKEN=1200` 和 `ENABLE_CONVERSATION_HISTORY_COMPACTION=false`。上下文预算包含上游框架提示和工具响应。源响应每项上限 128 KiB、Holmes 响应上限 512 KiB；最多保存 2 项初始证据、8 项实际调用结果和 3 段各不超过 2000 个码点的建议。[OpenAI 模型文档](https://developers.openai.com/api/docs/models/gpt-6.1-sol) · [Holmes 用量和上下文实现](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/holmes/core/llm.py)
 
-## 本地验证
+`usage` 记录配置模型名、提示版本 `frozen-observations-v2` 及上游返回的汇总输入/输出令牌。缺失或仅有上游默认零值时记为 `null`。`estimatedCostUsd` 仅保留上游正数估算。Holmes 的响应不是供应商账单，因此已发生真实模型调用时 `costUsd=null`，由 Java 保留未核实金额供人工核对。只有确认未调用模型时才记 `costUsd=0`。单任务预留额约束本系统准入，不能替代供应商账户硬限额。[上游锁定版本](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/poetry.lock) · [上游许可证](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/LICENSE)
 
-在本目录的 Python 3.13 虚拟环境中执行 `python -m pip install -r requirements.txt`、`python -m unittest -v`。这些测试通过实际 HTTP 读取演示数据，对模型异常、无证据、认证、工具白名单和恢复进行检查。模型响应由本地 HTTP 替身提供。
+## Checkout 演示兼容
 
-单独验证模型协议时，在隔离环境安装 `litellm==1.103.5` 与 `PyYAML`。部分平台的 wheel 缺少 cl100k_base 公共词表，先准备缓存，再运行断网验证。在 PowerShell 中执行以下命令。词表由 tiktoken 下载并校验哈希，无需模型凭据。
+仅在设置 `DEMO_URL` 时登记 `checkout-demo`。旧请求省略 `sourceId` 时仍走该源，使用 `EVIDENCE_TOKEN` 读取原子 `/snapshot` 的最近 50 个请求及最新错误，请求中的历史时间范围不适用于演示源。人工以 `DEMO_CONTROL_TOKEN` 调用 `POST /control` 切换许可池占用，随后实际访问 `GET /checkout` 产生 503 或 200。其凭据与外部 Prometheus/Loki 相互独立。
 
-```powershell
-$env:CUSTOM_TIKTOKEN_CACHE_DIR = Join-Path $env:TEMP 'causelume-agent-046-tokenizer'
-$env:TIKTOKEN_CACHE_DIR = $env:CUSTOM_TIKTOKEN_CACHE_DIR
-python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
-python verify_responses.py
-```
+## 复验
 
-验证脚本只允许回环连接，核验真实桥接包发出的 URL、模型名、函数工具以及响应到工具调用的转换。真实模型能力与账户权限需要另行验证。
+在 Python 3.13 虚拟环境运行 `python -m pip install -r agent/requirements.txt`，再从仓库根运行 `python -m unittest discover -s agent -v`。覆盖取证并发、窗口、上游故障、标签注入、重定向、保密、费用未知和未预留拒绝。执行 `python agent/verify_observability.py` 创建独立随机名的临时 Compose 项目，运行真实 Spring Boot、Prometheus、Alloy、Loki，逐项校验 `agent/evaluation-cases.json` 的 6 类事实与限制。测试端口由 Docker 分配至回环地址，结束后清除本次临时栈及其测试卷。
 
-
-使用固定版本的上游镜像验证真实 Holmes 工具链时，在仓库根目录运行下面的 PowerShell 命令。只挂载新配置和测试脚本，使用假凭据与容器内回环模型替身，不加入项目网络。脚本检查正常工具调用的两个原始结果，并用恶意请求头验证 shell 注入被拦截。
+独立上游工具黑盒不访问外网，使用回环模型替身。PowerShell 示例：
 
 ```powershell
 $fixture = (Resolve-Path agent/verify_holmes_snapshot.py).Path
-$config = (Resolve-Path agent/holmes-snapshot.yaml).Path
+$config = (Resolve-Path agent/holmes-observations.yaml).Path
 docker run --rm --network none --pull never `
   --mount "type=bind,src=$fixture,dst=/contract/verify_holmes_snapshot.py,readonly" `
-  --mount "type=bind,src=$config,dst=/contract/holmes-snapshot.yaml,readonly" `
+  --mount "type=bind,src=$config,dst=/contract/holmes-observations.yaml,readonly" `
   --entrypoint python robustadev/holmes@sha256:bec9d14eea6a8890ba498c91ab47adcce3af9b6d0c6ee26d642d4e3e0df6218e `
   /contract/verify_holmes_snapshot.py
 ```
+
+如需独立验证 LiteLLM 路由，在额外虚拟环境中安装 `litellm==1.103.5 PyYAML`。部分 wheel 缺少 cl100k_base 公共词表，先设置 `CUSTOM_TIKTOKEN_CACHE_DIR`、`TIKTOKEN_CACHE_DIR` 为同一临时目录，再运行 `python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"` 准备词表。执行 `python agent/verify_responses.py` 时只允许回环流量。

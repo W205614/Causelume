@@ -1,0 +1,76 @@
+# Use with compose.production.yaml. No host-published observability ports.
+x-observer: &observer
+  restart: unless-stopped
+  networks: [telemetry]
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+services:
+  prometheus:
+    <<: *observer
+    image: prom/prometheus@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--storage.tsdb.retention.time=7d", "--storage.tsdb.retention.size=2GB"]
+    secrets: [MANAGEMENT_TOKEN]
+    volumes:
+      - prometheus-data:/prometheus
+      - ./deployment/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deployment/observability/service-alerts.yml:/etc/prometheus/service-alerts.yml:ro
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+  alertmanager:
+    <<: *observer
+    image: prom/alertmanager@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
+    command: ["--config.file=/etc/alertmanager/config.yml", "--storage.path=/alertmanager", "--cluster.listen-address="]
+    secrets: [ALERTMANAGER_TOKEN]
+    volumes:
+      - alertmanager-data:/alertmanager
+      - ./deployment/observability/alertmanager.yml:/etc/alertmanager/config.yml:ro
+    mem_limit: 192m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9093/-/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+  loki:
+    <<: *observer
+    image: grafana/loki@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
+    command: ["-config.file=/etc/loki/causelume.yml"]
+    volumes:
+      - loki-data:/loki
+      - ./deployment/observability/loki.yml:/etc/loki/causelume.yml:ro
+    mem_limit: 512m
+  alloy:
+    <<: *observer
+    image: grafana/alloy@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
+    command: ["run", "--disable-reporting", "--server.http.listen-addr=0.0.0.0:12345", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
+    volumes:
+      - ./deployment/observability/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-positions:/var/lib/alloy/data
+      - logs:/var/log/causelume:ro
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/12345; printf 'GET /-/ready HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3; head -1 <&3 | grep -q ' 200 '"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+  example-service:
+    <<: *observer
+    build: ./deployment/observability/example
+    depends_on:
+      initlogs: {condition: service_completed_successfully}
+    volumes: [logs:/var/log/causelume]
+    mem_limit: 320m
+    healthcheck:
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/8085; printf 'GET /actuator/health HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3; head -1 <&3 | grep -q ' 200 '"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+volumes:
+  prometheus-data: {}
+  alertmanager-data: {}
+  loki-data: {}
+  alloy-positions: {}

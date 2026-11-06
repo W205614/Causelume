@@ -3,6 +3,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 BIND_HOST=0.0.0.0
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY common.py investigator.py checkout.py ./
+COPY common.py observability.py investigator.py checkout.py ./
 USER 65532:65532
 CMD ["python", "investigator.py"]

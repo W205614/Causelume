@@ -1,0 +1,27 @@
+model: openai/gpt-6.1-sol
+api_base: https://api.openai.com/v1
+max_steps: 4
+toolsets:
+  bash: {enabled: false}
+  confluence: {enabled: false}
+  connectivity_check: {enabled: false}
+  core_investigation: {enabled: false}
+  internet: {enabled: false}
+  kubernetes/logs: {enabled: false}
+  skills: {enabled: false}
+  causelume_observations:
+    enabled: true
+    description: Read the immutable service sample attached to this investigation.
+    tools:
+      - name: frozen_metrics
+        description: Read sampled request and HTTP 5xx counts from this investigation.
+        user_description: Read frozen service metrics
+        command: >-
+          python -c "import base64,sys; s=sys.argv[1]; sys.stdout.buffer.write(base64.b64decode(s+'='*(-len(s)%4), altchars=b'-_', validate=True))"
+          '{{ (request_context.headers["X-Causelume-Metrics"]) | urlencode }}'
+      - name: frozen_logs
+        description: Read the frozen redacted log sample and its completeness.
+        user_description: Read frozen service logs
+        command: >-
+          python -c "import base64,sys; s=sys.argv[1]; sys.stdout.buffer.write(base64.b64decode(s+'='*(-len(s)%4), altchars=b'-_', validate=True))"
+          '{{ (request_context.headers["X-Causelume-Logs"]) | urlencode }}'

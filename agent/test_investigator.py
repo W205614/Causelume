@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -43,7 +44,7 @@ class InvestigationTests(unittest.TestCase):
         self.agent = investigator.create_app().test_client()
 
     def run_task(self):
-        return self.agent.post("/investigate", json={"service": "checkout", "taskId": "incident-16"},
+        return self.agent.post("/investigate", json={"service": "checkout", "taskId": "incident-16", "allowModel": True},
                                headers=auth("test-agent"))
 
     def toggle(self, enabled):
@@ -84,7 +85,7 @@ class InvestigationTests(unittest.TestCase):
 
     def test_model_http_contract_and_failures(self):
         holmes = Flask("holmes-contract-double")
-        enabled = [{"name": "causelume_snapshot", "enabled": True, "status": "enabled", "tool_count": 2}]
+        enabled = [{"name": "causelume_observations", "enabled": True, "status": "enabled", "tool_count": 2}]
         analysis = {key: f"test {key}" for key in investigator.FIELDS}
         model_status = 200
         chats = []
@@ -103,6 +104,11 @@ class InvestigationTests(unittest.TestCase):
         with http_service(holmes) as url, patch.dict(os.environ, {
                 "HOLMES_URL": url, "AGENT_MODE": "holmes", "HOLMES_API_KEY": "test-holmes"}):
             self.agent = investigator.create_app().test_client()
+            for allow in ({}, {"allowModel": False}):
+                blocked = self.agent.post("/investigate", json={"taskId": "old-job", "service": "checkout", **allow},
+                                          headers=auth("test-agent"))
+                self.assertEqual(blocked.status_code, 422)
+            self.assertFalse(chats)
             self.demo.get("/checkout")
             result = self.run_task()
             self.assertEqual(result.status_code, 200)
@@ -130,19 +136,19 @@ class InvestigationTests(unittest.TestCase):
         @holmes.get("/api/info")
         def info():
             return {"auth_enabled": True, "toolsets": [
-                {"name": "causelume_snapshot", "enabled": True, "status": "enabled", "tool_count": 2}]}
+                {"name": "causelume_observations", "enabled": True, "status": "enabled", "tool_count": 2}]}
 
         @holmes.post("/api/chat")
         def chat():
-            metrics = bytes.fromhex(request.headers["X-Causelume-Metrics"]).decode()
-            logs = bytes.fromhex(request.headers["X-Causelume-Logs"]).decode()
+            metrics = base64.urlsafe_b64decode(request.headers["X-Causelume-Metrics"]+"===").decode()
+            logs = base64.urlsafe_b64decode(request.headers["X-Causelume-Logs"]+"===").decode()
             if json.loads(metrics)["errors"]:
                 fault_view.append(logs)
                 sampled.set()
                 assert recovered.wait(4)
             if substitute_other_view:
                 logs = fault_view[0]
-            calls = [{"tool_call_id": "call-42", "tool_name": "checkout_logs",
+            calls = [{"tool_call_id": "call-42", "tool_name": "frozen_logs",
                       "result": {"status": "success", "data": logs}}]
             return {"analysis": json.dumps(dict.fromkeys(investigator.FIELDS, "contract")), "tool_calls": calls}
 
@@ -152,7 +158,7 @@ class InvestigationTests(unittest.TestCase):
 
             def inspect(task_id):
                 return app.test_client().post("/investigate", headers=auth("test-agent"),
-                                              json={"taskId": task_id, "service": "checkout"})
+                                              json={"taskId": task_id, "service": "checkout", "allowModel": True})
 
             self.toggle(True)
             failed_request = self.demo.get("/checkout").json["id"]
@@ -172,7 +178,7 @@ class InvestigationTests(unittest.TestCase):
             for result in (first.json, second.json):
                 tool = result["evidence"][-1]
                 view = json.loads(tool["detail"].split(" ", 1)[1])
-                self.assertEqual(tool["source"], "holmes:checkout_logs")
+                self.assertEqual(tool["source"], "holmes:frozen_logs")
                 self.assertEqual((view["snapshotId"], view["sampledAt"]), (result["snapshotId"], result["sampledAt"]))
             self.assertNotIn(failed_request, str(second.json["evidence"]))
             substitute_other_view = True

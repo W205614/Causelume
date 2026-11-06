@@ -9,6 +9,9 @@ services:
       APP_DB_URL: jdbc:h2:file:/app/data/causelume
       DEMO_URL: http://checkout:8092
       EVIDENCE_TOKEN: ${EVIDENCE_TOKEN:?required}
+      AGENT_MODE: ${AGENT_MODE:-offline}
+      MODEL_DAILY_BUDGET_USD: ${MODEL_DAILY_BUDGET_USD:-}
+      MODEL_RESERVATION_USD: ${MODEL_RESERVATION_USD:-}
       AGENT_URL: http://agent:8091
       AGENT_TOKEN: ${AGENT_TOKEN:?required}
     ports:
@@ -68,12 +71,15 @@ services:
     entrypoint: ["python", "-u", "server.py"]
     environment:
       LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES: 'true'
+      OVERRIDE_MAX_CONTENT_SIZE: "16384"
+      OVERRIDE_MAX_OUTPUT_TOKEN: "1200"
+      ENABLE_CONVERSATION_HISTORY_COMPACTION: "false"
       OPENAI_BASE_URL: https://api.openai.com/v1
       HOLMES_CONFIGPATH_DIR: /etc/causelume
       HOLMES_API_KEY: ${HOLMES_API_KEY:?required}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
-      - ./agent/holmes-snapshot.yaml:/etc/causelume/config.yaml:ro
+      - ./agent/holmes-observations.yaml:/etc/causelume/config.yaml:ro
     networks: [evidence, model]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5050/healthz',timeout=2)"]

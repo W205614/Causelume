@@ -1,0 +1,8 @@
+[
+  {"case":"unreachable","service":"causelume","action":null,"facts":["min_up=0"],"limitations":"没有可达性记录以外的依据，不能认定业务根因或停止服务。"},
+  {"case":"errors","service":"example-service","action":"error","facts":["errors>0","request_failed"],"limitations":"5xx 增量不能区分故障发生的位置。"},
+  {"case":"slow","service":"example-service","action":"slow","facts":["mean_seconds>1","slow_request","duration_ms>=1000"],"limitations":"有限请求与窗口平均数不能转换为 p95/p99。"},
+  {"case":"dependency","service":"example-service","action":"dependency","facts":["connection_refused"],"limitations":"连接失败发生在示例容器内，不能推断外部数据库离线。"},
+  {"case":"no-data","service":"unregistered-label","action":null,"facts":["empty"],"limitations":"查询无样本，不代表健康。"},
+  {"case":"injection","service":"example-service","action":"injection","facts":["unclassified","no fixture secret or embedded instructions"],"limitations":"未知事件文本经过移除，不能据此定位故障。"}
+]

@@ -45,7 +45,7 @@ class InvestigationWorker {
               error='调查超期，最终结果未确认',finished_at=current_timestamp
             where status='RUNNING' and current_timestamp >= deadline_at""");
         var jobs = store.rows("""
-            select t.id,s.name from tasks t join tickets k on k.id=t.ticket_id
+            select t.id,s.name,t.source_id,t.service_label,t.environment,t.window_start,t.window_end from tasks t join tickets k on k.id=t.ticket_id
             join services s on s.id=k.service_id where t.status='PENDING' order by t.id fetch first 1 row only""");
         if (jobs.isEmpty()) return;
         var job = jobs.getFirst();
@@ -53,7 +53,7 @@ class InvestigationWorker {
         if (store.db.update("update tasks set status='RUNNING',started_at=current_timestamp,deadline_at=current_timestamp + interval '120' second where id=? and status='PENDING'",id)==0) return;
         JsonNode result;
         try {
-            result = investigate(id,(String)job.get("name"));
+            result = investigate(id,job);
         } catch (Problem e) {
             String code = switch (e.status) {
                 case 504 -> "UPSTREAM_TIMEOUT";
@@ -76,9 +76,9 @@ class InvestigationWorker {
                 code,message,id);
     }
 
-    private JsonNode investigate(long id,String service) {
+    private JsonNode investigate(long id,Map<String,Object> job) {
         String taskId = Long.toString(id);
-        JsonNode result = upstream.call("AGENT_URL","AGENT_TOKEN","/investigate",Map.of("taskId",taskId,"service",service),95);
+        JsonNode result = upstream.call("AGENT_URL","AGENT_TOKEN","/investigate",investigationRequest(taskId,job),95);
         if (!taskId.equals(result.path("taskId").asString("")) || !List.of("offline","holmes").contains(result.path("mode").asString("")))
             throw new Problem(502,"调查服务返回的任务标识或模式无效");
         for (String key : List.of("possibleCause","uncertainty","recommendation")) {
@@ -90,6 +90,20 @@ class InvestigationWorker {
             if (!validText(row.get("source"),100) || !validText(row.get("detail"),2048)) throw new Problem(502,"证据来源或详情为空或超长");
         }
         return result;
+    }
+
+    private Map<String,Object> investigationRequest(String id,Map<String,Object> job) {
+        var body=new java.util.LinkedHashMap<String,Object>();
+        body.put("taskId",id);
+        body.put("allowModel",!store.rows("select task_id from model_reservations where task_id=? and state='HELD'",Long.parseLong(id)).isEmpty());
+        body.put("service",job.get("serviceLabel")==null ? job.get("name") : job.get("serviceLabel"));
+        if(job.get("sourceId")!=null) {
+            body.put("sourceId",job.get("sourceId"));
+            body.put("environment",job.get("environment"));
+            body.put("windowStart",job.get("windowStart"));
+            body.put("windowEnd",job.get("windowEnd"));
+        }
+        return body;
     }
 
     private boolean validText(JsonNode value,int max) {

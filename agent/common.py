@@ -1,5 +1,6 @@
 import hmac
 import os
+from pathlib import Path
 
 from flask import Flask, abort, request
 from waitress import serve
@@ -8,6 +9,11 @@ from werkzeug.exceptions import HTTPException
 
 def required(name):
     value = os.environ.get(name, "").strip()
+    path = os.environ.get(name + "_FILE")
+    if path:
+        if value:
+            raise ValueError(f"Set either {name} or {name}_FILE")
+        value = Path(path).read_text(encoding="utf-8").strip()
     if not value:
         raise ValueError(f"{name} must be configured")
     return value

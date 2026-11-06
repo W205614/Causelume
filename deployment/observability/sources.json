@@ -1,0 +1,8 @@
+[
+  {
+    "id": "prom-loki",
+    "name": "本机 Prometheus 与 Loki",
+    "prometheus": {"url": "http://query-gateway:9090"},
+    "loki": {"url": "http://query-gateway:3100"}
+  }
+]

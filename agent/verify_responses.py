@@ -22,7 +22,7 @@ def verify():
     import yaml
 
     assert version("litellm") == "1.103.5"
-    config = yaml.safe_load(Path(__file__).with_name("holmes-snapshot.yaml").read_text(encoding="utf-8"))
+    config = yaml.safe_load(Path(__file__).with_name("holmes-observations.yaml").read_text(encoding="utf-8"))
     assert config["api_base"] == "https://api.openai.com/v1"
     seen = []
 
