@@ -248,4 +248,4 @@ python scripts/verify_candidate.py
 - **如何切换模型模式？** 默认使用 `AGENT_MODE=offline`。设置模型密钥、预算、`AGENT_MODE=holmes` 和 `COMPOSE_PROFILES=holmes` 后，重新创建容器；本机覆盖文件中的模式设置也需同步调整。
 - **如何反馈问题？** 提供提交号或镜像摘要、复现步骤和脱敏日志。配置排查见 [安全说明](backend/SECURITY.md) 和 [运维手册](docs/operations.md)。
 
-更多配置、接口和操作说明见 [文档导航](docs/README.md)。
+更多配置、接口和操作说明见 [文档导航](docs/README.md)。参与开发见 [贡献指南](CONTRIBUTING.md)，安全问题通过 [私密报告流程](SECURITY.md) 反馈。
