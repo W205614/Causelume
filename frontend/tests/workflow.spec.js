@@ -252,6 +252,7 @@ test("任务列表使用摘要，详情自动刷新，离开页面后停止", as
   await expect(page.getByText("待采集结算样本")).toBeVisible();
   expect(detailReads).toBe(0);
   await page.getByRole("link", { name: "#5" }).click();
+  await expect(heading(page, "调查 #5")).toBeVisible();
   await expect(page.getByText("等待调查", { exact: true })).toBeVisible();
   await page.clock.fastForward(5100);
   await expect(page.getByText("调查中", { exact: true })).toBeVisible();
