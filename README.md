@@ -44,7 +44,7 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 ### 准备环境
 
-本地体验需要 Git、Python 3.13 和已启动的 [Docker Desktop](https://docs.docker.com/compose/install/)（使用 Linux 容器）。Linux 也可使用 Docker Engine 与 Compose 插件。Java、Maven、Node.js 和数据库由容器提供。
+本地体验需要 Git、Python 3.13 和已启动的 [Docker Desktop](https://docs.docker.com/compose/install/)（使用 Linux 容器）。Linux 也可使用 Docker Engine 与 Compose 插件。Java 构建与运行、H2 数据库均在容器内；前端为静态文件，本机无需安装 Node.js。
 
 在终端检查：
 
