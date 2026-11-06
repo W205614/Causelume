@@ -25,3 +25,16 @@ Web 页面和 /api 同源。POST 使用 application/json，登录成功后由容
 - APP_DB_URL 默认 `jdbc:h2:file:./data/causelume`。文件库适用于单实例部署，Flyway 在启动时按版本迁移。
 
 执行 `mvn -f backend/pom.xml test` 运行真实 HTTP、数据库迁移、用户权限和工单流转集成测试。
+
+## 调查与服务证据
+
+| 方法和路径 | 契约 |
+|---|---|
+| GET /api/services/{id}/metrics 或 /logs | 登录用户读取服务实测证据。当前只接入 checkout，其他服务返回 422 |
+| POST /api/tasks | ticketId、requestId(UUID)。已分派或处理中，由负责人或管理员发起，创建时返回 PENDING |
+| GET /api/tasks；GET /api/tasks?ticketId={id} | 登录用户查看任务，含 id、ticketId、status、createdAt、mode、result、error、feedback |
+| POST /api/tasks/{id}/feedback | 已结束任务由管理员或负责人提交一次 feedback；冲突返回 409 |
+
+同一工单只能有一个等待中或运行中的任务。请求标识归属发起账号，重投时返回原任务。每次调查经 PENDING → RUNNING → SUCCEEDED 或 FAILED；失败留存原因。单实例工作者在事务外调用 Python，重启后接续 PENDING、标记遗留 RUNNING 为 FAILED，避免重复调用模型。
+
+Java 将服务器端 AGENT_TOKEN 作为 Bearer 凭据，向 AGENT_URL 的 /investigate 发送字符串 taskId、服务名称 service。连接限时 3 秒，单次响应限时 95 秒。成功返回必须匹配 taskId，含 mode(offline/holmes)、非空 evidence（每项包括 source、detail）、possibleCause、uncertainty、recommendation。Java 校验后存储。422、504、服务不可达及无效数据会留下失败记录。反馈及任务创建记录于操作审计。DEMO_URL 的 /logs、/metrics 使用独立 EVIDENCE_TOKEN，只读代理的响应限时 5 秒。

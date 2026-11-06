@@ -1,4 +1,4 @@
-import { demo, investigationAvailable, request } from "./api.js";
+import { demo, request } from "./api.js";
 import {
   esc,
   brand,
@@ -8,6 +8,7 @@ import {
   overview,
   ticketsPage,
   servicesPage,
+  observations,
   alertsPage,
   usersPage,
   tasksPage,
@@ -95,8 +96,16 @@ async function render() {
   shell(page);
   const main = root.querySelector("main");
   try {
-    const names = ["tickets", "services", "users", "alerts"];
-    if (investigationAvailable) names.push("tasks");
+    const needs = {
+      overview: ["tickets", "services", "alerts", "tasks"],
+      services: ["services"],
+      alerts: ["alerts", "tickets", "services"],
+      tickets: ["tickets", "services", "users", "tasks"],
+      tasks: ["tasks", "tickets"],
+      users: ["users"],
+    };
+    const names = needs[page];
+    if (!names) throw Error("页面不存在");
     if (!demo && page === "users" && me.role === "ADMIN") names.push("audit");
     const rows = await Promise.all(names.map((n) => request("/" + n)));
     const t =
@@ -107,8 +116,6 @@ async function render() {
     data = Object.fromEntries(names.map((n, i) => [n, rows[i]]));
     data.admin = me.role === "ADMIN";
     data.actorId = me.id;
-    data.tasks ??= [];
-    data.investigationAvailable = investigationAvailable;
     ticket = t;
     task =
       page === "tasks" && id
@@ -124,10 +131,22 @@ async function render() {
       users: usersPage,
     }[page];
     if (!view) throw Error("页面不存在");
+    if (page === "services" && id) {
+      const service = data.services.find((s) => String(s.id) === id);
+      if (!service) throw Error("服务不存在");
+      const [metrics, logs] = await Promise.all(
+        ["metrics", "logs"].map((key) =>
+          request("/services/" + service.id + "/" + key),
+        ),
+      );
+      if (version === epoch)
+        main.innerHTML = observations(service, metrics, logs);
+      return;
+    }
     main.innerHTML = ticket
       ? detail(ticket, data)
       : task
-        ? taskDetail(task)
+        ? taskDetail(task, data)
         : view(data);
     const filter = document.querySelector("#filter");
     if (filter)
@@ -337,7 +356,9 @@ root.onclick = async (e) => {
     const requestId = crypto.randomUUID();
     form(
       "发起只读调查",
-      "<p>调查结果将关联工单 #" + ticket.id + "，供人工核查。</p>",
+      "<p>调查结果将关联工单 #" + ticket.id + "，供人工核查。</p>" +
+        (demo ? "<p>本次使用模拟数据。</p>" :
+          "<p>若服务端启用 HolmesGPT，确认后将调用模型，可能产生 API 费用。离线模式使用规则分析。</p>"),
       async () => {
         const t = await request("/tasks", { ticketId: ticket.id, requestId });
         return "tasks/" + t.id;

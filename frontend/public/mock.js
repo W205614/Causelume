@@ -7,7 +7,7 @@ const users = [
 const services = [
   {
     id: 1,
-    name: "checkout-api",
+    name: "checkout",
     description: "订单结算服务",
     resource: "HTTP · /checkout",
   },
@@ -79,6 +79,15 @@ export async function request(path, body) {
   }
   if (!me) throw Object.assign(Error("请先登录"), { status: 401 });
   if (path === "/me") return me;
+  if (path === "/services/1/metrics")
+    return { service: "checkout", observedAt: now(), requests: 1, errors: 1 };
+  if (path === "/services/1/logs")
+    return {
+      service: "checkout",
+      entries: [
+        { at: now(), event: "模拟连接池耗尽", status: 503, id: "demo-1" },
+      ],
+    };
   if (path === "/logout") {
     me = null;
     return;
@@ -93,7 +102,7 @@ export async function request(path, body) {
     throw Error("需要管理员权限");
   if (operation === "actions") {
     const step = {
-      ASSIGN: ["OPEN", "ASSIGNED"],
+      ASSIGN: [item.status === "ASSIGNED" ? "ASSIGNED" : "OPEN", "ASSIGNED"],
       START: ["ASSIGNED", "PROCESSING"],
       VERIFY: ["PROCESSING", "VERIFIED"],
       CLOSE: ["VERIFIED", "CLOSED"],

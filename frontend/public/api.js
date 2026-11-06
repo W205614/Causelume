@@ -1,6 +1,5 @@
 // Demo mode must be selected explicitly. API errors always reach the operator.
 export const demo = new URLSearchParams(location.search).get("demo") === "1";
-export const investigationAvailable = demo;
 const fixture = demo ? await import("./mock.js") : null;
 export async function request(path, body) {
   if (fixture) return fixture.request(path, body);

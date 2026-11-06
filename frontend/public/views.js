@@ -53,6 +53,9 @@ const labels = {
   CREATE: "创建",
   ADMIN: "管理员",
   OPERATOR: "运维人员",
+  offline: "离线规则 · 无模型调用",
+  holmes: "HolmesGPT 模型调查",
+  QUEUED: "排队中",
 };
 export const label = (v) => labels[v] ?? v;
 const pill = (v) =>
@@ -206,11 +209,43 @@ export function servicesPage({ services, admin }) {
               esc(s.description) +
               '</p><p class="muted">' +
               esc(s.resource) +
-              "</p></article>",
+              "</p>" +
+              (s.name === "checkout"
+                ? navLink("services/" + s.id, "查看日志与指标")
+                : "") +
+              "</article>",
           )
           .join("") +
         "</div>"
       : '<p class="empty">暂无服务</p>')
+  );
+}
+export function observations(service, metrics, logs) {
+  return (
+    navLink("services", "返回服务列表") +
+    header(service.name, button("refresh", "刷新读数")) +
+    panel(
+      "请求指标",
+      '<div class="pad"><p>采样时间　' +
+        time(metrics.observedAt) +
+        "</p><p>最近请求　" +
+        esc(metrics.requests) +
+        "　　错误请求　" +
+        esc(metrics.errors) +
+        "</p></div>",
+    ) +
+    panel(
+      "请求日志",
+      table(
+        ["时间", "事件", "HTTP 状态", "请求 ID"],
+        logs.entries.map((row) => [
+          time(row.at),
+          esc(row.event),
+          esc(row.status),
+          esc(row.id),
+        ]),
+      ),
+    )
   );
 }
 export const alertsPage = ({ alerts, services, tickets }) =>
@@ -260,11 +295,7 @@ export const usersPage = ({ users, admin, audit }) =>
         : "")
     : header(pages.users) +
       '<div class="retry"><strong>权限不足</strong><p>此页面仅对管理员开放。</p></div>';
-export function tasksPage({ tasks, investigationAvailable }) {
-  if (!investigationAvailable)
-    return (
-      header(pages.tasks) + '<p class="empty">Agent 服务将在第三阶段接入。</p>'
-    );
+export function tasksPage({ tasks }) {
   return (
     header(pages.tasks) +
     panel(
@@ -275,20 +306,20 @@ export function tasksPage({ tasks, investigationAvailable }) {
           navLink("tasks/" + t.id, "#" + t.id),
           navLink("tickets/" + t.ticketId, "工单 #" + t.ticketId),
           pill(t.status),
-          esc(t.mode),
+          esc(label(t.mode)),
           time(t.createdAt),
         ]),
       ),
     )
   );
 }
-export function taskDetail(t) {
+export function taskDetail(t, { tickets, admin, actorId }) {
   const r = t.result;
   let body =
     '<div class="pad"><p>' +
     pill(t.status) +
     "　" +
-    esc(t.mode) +
+    esc(label(t.mode)) +
     "</p><p>关联 " +
     navLink("tickets/" + t.ticketId, "工单 #" + t.ticketId) +
     "</p>";
@@ -314,17 +345,20 @@ export function taskDetail(t) {
       esc(r.recommendation) +
       "</p>";
   if (t.feedback) body += "<h3>人工反馈</h3><p>" + esc(t.feedback) + "</p>";
-  if (t.status === "SUCCEEDED") body += button("feedback", "填写反馈");
+  const owner = tickets.find((ticket) => ticket.id === t.ticketId)?.assigneeId;
+  if (
+    !t.feedback &&
+    ["SUCCEEDED", "FAILED"].includes(t.status) &&
+    (admin || actorId === owner)
+  )
+    body += button("feedback", "填写反馈");
   return (
     navLink("tasks", "返回任务列表") +
     header("调查 #" + t.id, button("refresh", "刷新状态")) +
     panel("调查结果", body + "</div>")
   );
 }
-export function detail(
-  t,
-  { users, services, tasks, admin, actorId, investigationAvailable },
-) {
+export function detail(t, { users, services, tasks, admin, actorId }) {
   const next = {
     OPEN: "ASSIGN",
     ASSIGNED: "START",
@@ -337,7 +371,14 @@ export function detail(
   if (admin && t.status === "ASSIGNED")
     actions += button("action:ASSIGN", "改派");
   if (next) actions += button("action:NOTE", "添加记录");
-  if (next && investigationAvailable)
+  const related = tasks.filter((task) => task.ticketId === t.id);
+  if (
+    ["ASSIGNED", "PROCESSING"].includes(t.status) &&
+    canAdvance &&
+    !related.some((task) =>
+      ["QUEUED", "PENDING", "RUNNING"].includes(task.status),
+    )
+  )
     actions += button("investigate", "发起调查");
   const assignee = users.find((u) => u.id === t.assigneeId);
   const about =
@@ -369,7 +410,6 @@ export function detail(
       )
       .join("") +
     "</ol>";
-  const related = tasks.filter((task) => task.ticketId === t.id);
   return (
     navLink("tickets", "返回工单列表") +
     header("#" + t.id + "　" + t.title, actions) +

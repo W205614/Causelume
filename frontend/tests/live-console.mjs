@@ -50,6 +50,38 @@ try {
   await expect(
     page.getByText("关闭并复盘 · 浏览器验收记录", { exact: true }),
   ).toBeVisible();
+  if (process.env.CAUSELUME_VERIFY_EVIDENCE === "1") {
+    await page
+      .getByRole("navigation")
+      .getByRole("link", { name: "Agent 调查" })
+      .click();
+    await page
+      .getByRole("row")
+      .filter({ hasText: "已完成" })
+      .first()
+      .getByRole("link")
+      .first()
+      .click();
+    for (const source of [
+      "checkout:/metrics",
+      "checkout:/logs",
+      "已人工核对日志与指标",
+    ]) {
+      await expect(page.getByText(source, { exact: true })).toBeVisible();
+    }
+    await page
+      .getByRole("navigation")
+      .getByRole("link", { name: "服务与资源" })
+      .click();
+    await page.getByRole("link", { name: "查看日志与指标" }).click();
+    await expect(page.getByRole("heading", { name: "请求指标" })).toBeVisible();
+    await expect(
+      page.getByRole("row").filter({ hasText: "checkout_ok" }).first(),
+    ).toBeVisible();
+    console.log(
+      "PASS: service metrics, observed recovery request, stored investigation evidence and feedback",
+    );
+  }
   await page.getByRole("button", { name: "退出登录" }).click();
   await expect(
     page.getByRole("heading", { name: "登录运维控制台" }),
