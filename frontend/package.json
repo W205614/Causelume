@@ -1,0 +1,14 @@
+{
+  "name": "causelume-console",
+  "version": "1.0.0",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "playwright test"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "^1.65.0"
+  }
+}

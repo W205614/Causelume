@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+node_modules/
+target/
+__pycache__/
+*.pyc
+.venv/
+data/
+playwright-report/
+test-results/
