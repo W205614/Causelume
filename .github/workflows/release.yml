@@ -13,8 +13,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build release images
         run: |
-          docker build -t ghcr.io/w205614/causelume-app:${GITHUB_SHA} .
-          docker build -t ghcr.io/w205614/causelume-agent:${GITHUB_SHA} agent
+          docker build --label org.opencontainers.image.revision=$GITHUB_SHA -t ghcr.io/w205614/causelume-app:${GITHUB_SHA} .
+          docker build --label org.opencontainers.image.revision=$GITHUB_SHA -t ghcr.io/w205614/causelume-agent:${GITHUB_SHA} agent
       - name: Scan application images
         run: |
           docker save ghcr.io/w205614/causelume-app:${GITHUB_SHA} -o /tmp/app.tar

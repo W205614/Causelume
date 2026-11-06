@@ -97,3 +97,7 @@ systemctl list-timers 'causelume-*'
 ## 发布与升级
 
 每次升级先看 release-manifest、安全扫描与数据迁移结果。切换代码和 production.env 前，保留与旧版本对应的配置快照。release.sh 按 Compose 解析出的 PostgreSQL 数据卷名称判断是否首装。无卷且无运行中的数据库时直接拉取；有卷、数据库正在使用该卷时，即便 app 已停也先执行加密备份，成功后才拉取并更新。若数据库已停或挂载不匹配，脚本在拉取和迁移前中止。用旧版本兼容的 PostgreSQL 恢复数据库服务，核对挂载和数据后再执行升级。维护中安排停止业务写入，检查未知调查与通知。发布后核对历史数据和MFA，记录实际使用提交和镜像摘要。定期扫描依赖与镜像，补丁更新重跑直接影响的恢复与业务验收。
+
+## 镜像发布权限排障
+
+发布工作流使用仓库 GITHUB_TOKEN 的 packages:write 权限，镜像附带本仓库 source/revision 标签。若 GHCR 返回 denied，由包所有者在 GitHub Packages 的包设置中核对关联仓库为 W205614/Causelume，并在 Manage Actions access 中授予该仓库 Write。已存在但未关联的同名包不会仅凭仓库写权限自动开放；操作按 [GitHub官方权限说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) 执行。不要将个人令牌写入仓库或用取消扫描替代权限配置。实际推送及 release-manifest 成功后再填写生产镜像摘要。

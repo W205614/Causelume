@@ -10,5 +10,6 @@ ENV PYTHONPATH=/opt/dependencies PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 BI
 WORKDIR /app
 COPY --from=dependencies /opt/dependencies /opt/dependencies
 COPY common.py observability.py investigator.py checkout.py ./
+LABEL org.opencontainers.image.source="https://github.com/W205614/Causelume"
 USER 65532:65532
 CMD ["python", "investigator.py"]
