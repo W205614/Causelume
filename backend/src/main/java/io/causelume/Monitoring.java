@@ -35,7 +35,7 @@ class Monitoring {
         String title=Problem.text(input.title,200,"title");
         if(input.occurredAt==null) throw new Problem(400,"需要 occurredAt");
         try {
-            long id=store.insert("insert into alerts(service_id,source,external_id,severity,title,occurred_at) values (?,?,?,?,?,?)",
+            long id=store.insertIdempotent("insert into alerts(service_id,source,external_id,severity,title,occurred_at) values (?,?,?,?,?,?)",
                 input.serviceId,source,externalId,severity,title,input.occurredAt);
             store.audit(Access.actor(req).username(),"CREATE_ALERT",id);
             return store.one("select * from alerts where id=?",id);

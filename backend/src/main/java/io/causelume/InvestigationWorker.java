@@ -16,8 +16,8 @@ import tools.jackson.databind.JsonNode;
 class InvestigationWorker {
     private static final Logger LOG = LoggerFactory.getLogger(InvestigationWorker.class);
     // Allow the 95-second HTTP call to finish and leave room to commit its result.
-    private static final String DEADLINE = "dateadd(second,120,started_at)";
-    private static final String ACTIVE = " where id=? and status='RUNNING' and current_timestamp < "+DEADLINE;
+
+    private static final String ACTIVE = " where id=? and status='RUNNING' and current_timestamp < deadline_at";
     private final Store store;
     private final InternalClient upstream;
     private volatile boolean ready;
@@ -43,14 +43,14 @@ class InvestigationWorker {
         store.db.update("""
             update tasks set status='FAILED',error_code='DEADLINE_EXCEEDED',
               error='调查超期，最终结果未确认',finished_at=current_timestamp
-            where status='RUNNING' and current_timestamp >= """ + " " + DEADLINE);
+            where status='RUNNING' and current_timestamp >= deadline_at""");
         var jobs = store.rows("""
             select t.id,s.name from tasks t join tickets k on k.id=t.ticket_id
             join services s on s.id=k.service_id where t.status='PENDING' order by t.id fetch first 1 row only""");
         if (jobs.isEmpty()) return;
         var job = jobs.getFirst();
         long id = (long) job.get("id");
-        if (store.db.update("update tasks set status='RUNNING',started_at=current_timestamp where id=? and status='PENDING'",id)==0) return;
+        if (store.db.update("update tasks set status='RUNNING',started_at=current_timestamp,deadline_at=current_timestamp + interval '120' second where id=? and status='PENDING'",id)==0) return;
         JsonNode result;
         try {
             result = investigate(id,(String)job.get("name"));

@@ -8,7 +8,13 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 @SpringBootApplication
 public class Application {
-    public static void main(String[] args) { SpringApplication.run(Application.class, args); }
+    public static void main(String[] args) throws Exception {
+        if(args.length>0 && args[0].equals("storage")) {
+            OfflineStorage.run(args);
+            return;
+        }
+        SpringApplication.run(Application.class, args);
+    }
 
     @Bean BCryptPasswordEncoder encoder() { return new BCryptPasswordEncoder(); }
 

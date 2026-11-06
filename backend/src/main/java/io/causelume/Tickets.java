@@ -37,7 +37,7 @@ class Tickets {
         }
         long id;
         try {
-            id=store.insert("insert into tickets(service_id,alert_id,title,status,creator_id,request_id) values (?,?,?,'OPEN',?,?)",
+            id=store.insertIdempotent("insert into tickets(service_id,alert_id,title,status,creator_id,request_id) values (?,?,?,'OPEN',?,?)",
                 input.serviceId,input.alertId,title,actor.id(),input.requestId);
         } catch (DuplicateKeyException duplicate) {
             var matches=store.rows("select id,service_id,alert_id,title from tickets where creator_id=? and request_id=?",actor.id(),input.requestId);

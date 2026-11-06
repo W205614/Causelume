@@ -23,7 +23,7 @@ class WorkerRecoveryTest {
             long legacy = task(store,"SUCCEEDED");
             long interrupted = task(store,"RUNNING");
             long unexpected = task(store,"PENDING");
-            Flyway.configure().dataSource(source).load().migrate();
+            Flyway.configure().dataSource(source).locations("classpath:db/migration","classpath:db/common").load().migrate();
             assertNull(store.one("select * from tasks where id=?",legacy).get("finishedAt"));
             var calls = new AtomicInteger();
             var worker = new InvestigationWorker(store, new InternalClient(null,new ObjectMapper()) {
@@ -35,7 +35,7 @@ class WorkerRecoveryTest {
                         store.db.update("update tasks set status='FAILED',finished_at=current_timestamp,error_code='RESTART_INTERRUPTED' where id=?",body.get("taskId"));
                     }
                     if(call==4) {
-                        store.db.update("update tasks set started_at=dateadd(second,-121,current_timestamp) where id=?",body.get("taskId"));
+                        store.db.update("update tasks set deadline_at=current_timestamp - interval '1' second where id=?",body.get("taskId"));
                     }
                     var evidence=Map.of("source","test","detail",call==7 ? "x".repeat(2049) : "test");
                     return new ObjectMapper().valueToTree(Map.of("taskId",body.get("taskId"),"mode","offline",
@@ -58,7 +58,7 @@ class WorkerRecoveryTest {
             assertEquals("RUNNING",field(store,storageFailure,"status"));
             assertNull(store.one("select finished_at from tasks where id=?",storageFailure).get("finishedAt"));
             store.db.update("alter table tasks drop constraint simulate_write_outage");
-            store.db.update("update tasks set started_at=dateadd(second,-121,current_timestamp) where id=?",storageFailure);
+            store.db.update("update tasks set deadline_at=current_timestamp - interval '1' second where id=?",storageFailure);
             worker.processNext();
             assertEquals("DEADLINE_EXCEEDED",field(store,storageFailure,"error_code"));
             long late = task(store,"PENDING");

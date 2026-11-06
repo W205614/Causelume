@@ -12,7 +12,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import org.springframework.boot.web.servlet.ServletContextInitializer;
 
-record Actor(long id,String username,String role) implements Serializable {
+record Actor(long id,String username,String role,String email,boolean mfaEnabled,boolean enrollmentRequired,
+             @com.fasterxml.jackson.annotation.JsonIgnore long authVersion) implements Serializable {
     void admin() {
         if (!role.equals("ADMIN")) throw new Problem(403,"需要管理员权限");
     }
@@ -21,8 +22,10 @@ record Actor(long id,String username,String role) implements Serializable {
 @Configuration
 class Access implements WebMvcConfigurer, HandlerInterceptor {
     private final String publicOrigin;
+    private final Store store;
 
-    Access(Environment environment) {
+    Access(Environment environment,Store store) {
+        this.store=store;
         publicOrigin=environment.getProperty("APP_PUBLIC_ORIGIN","");
         if (!publicOrigin.isEmpty()) {
             URI uri=URI.create(publicOrigin);
@@ -57,7 +60,16 @@ class Access implements WebMvcConfigurer, HandlerInterceptor {
             if (media==null || !media.split(";",2)[0].trim().equalsIgnoreCase("application/json"))
                 throw new Problem(415,"写入请求必须使用 application/json");
         }
-        if (!req.getRequestURI().equals("/api/health") && !req.getRequestURI().equals("/api/login")) actor(req);
+        String path=req.getRequestURI();
+        if (path.equals("/api/health") || path.equals("/api/login")) return true;
+        Actor actor=actor(req);
+        var versions=store.rows("select auth_version from accounts where id=? and active=true",actor.id());
+        if (versions.isEmpty() || actor.authVersion()!=(long)versions.getFirst().get("authVersion")) {
+            req.getSession().invalidate();
+            throw new Problem(401,"账户状态已变更，请重新登录");
+        }
+        if (actor.enrollmentRequired() && !java.util.Set.of("/api/me","/api/logout","/api/account/mfa/enroll","/api/account/mfa/confirm").contains(path))
+            throw new Problem(403,"请先完成双因素认证绑定");
         return true;
     }
 }

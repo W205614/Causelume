@@ -11,7 +11,9 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 class Problem extends RuntimeException {
     final int status;
-    Problem(int status,String message) { super(message); this.status=status; }
+    final String code;
+    Problem(int status,String message) { this(status,message,null); }
+    Problem(int status,String message,String code) { super(message); this.status=status; this.code=code; }
     static String text(String value,int max,String field) {
         if (value == null || value.isBlank() || value.length()>max)
             throw new Problem(400, field+" 为必填项，最多 "+max+" 个字符");
@@ -26,7 +28,9 @@ class Problem extends RuntimeException {
 @RestControllerAdvice
 class Errors {
     @ExceptionHandler(Problem.class)
-    ResponseEntity<?> problem(Problem p) { return ResponseEntity.status(p.status).body(Map.of("message",p.getMessage())); }
+    ResponseEntity<?> problem(Problem p) {
+        return ResponseEntity.status(p.status).body(p.code==null ? Map.of("message",p.getMessage()) : Map.of("message",p.getMessage(),"code",p.code));
+    }
 
     @ExceptionHandler(DuplicateKeyException.class)
     ResponseEntity<?> duplicate() { return ResponseEntity.status(409).body(Map.of("message","记录已存在，请刷新后查看")); }

@@ -14,7 +14,7 @@ class Directories {
 
     @GetMapping("/users")
     ResponseEntity<?> users(@RequestParam(required=false) Long afterId, @RequestParam(defaultValue="100") int limit) {
-        return page("/api/users","select id,username,role from accounts",false,afterId,limit);
+        return page("/api/users","select id,username,role,active from accounts",false,afterId,limit);
     }
 
     @GetMapping("/services")

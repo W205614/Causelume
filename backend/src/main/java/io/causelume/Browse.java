@@ -69,7 +69,7 @@ class Browse {
         filters.code("k.status", status, TICKET_STATES);
         if (q != null && !q.isBlank()) {
             String term = Problem.text(q, 200, "q");
-            filters.clauses.add("(locate(lower(?),lower(k.title))>0 or cast(k.id as varchar)=?)");
+            filters.clauses.add("(position(lower(?) in lower(k.title))>0 or cast(k.id as varchar)=?)");
             filters.values.add(term);
             filters.values.add(term.startsWith("#") ? term.substring(1) : term);
         }
