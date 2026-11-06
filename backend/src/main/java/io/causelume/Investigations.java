@@ -11,7 +11,7 @@ import tools.jackson.databind.ObjectMapper;
 @RestController
 @RequestMapping("/api/tasks")
 class Investigations {
-    private static final String SELECT = "select id,ticket_id,status,mode,created_at,analysis,error,feedback from tasks";
+    private static final String SELECT = "select id,ticket_id,status,mode,created_at,started_at,finished_at,error_code,analysis,error,feedback from tasks";
     final Store store;
     final ObjectMapper json;
     Investigations(Store store, ObjectMapper json) {
