@@ -1,0 +1,8 @@
+[Unit]
+Description=Causelume external uptime heartbeat
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/bin/sh /opt/causelume/deployment/systemd/heartbeat.sh

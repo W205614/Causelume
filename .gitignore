@@ -9,3 +9,10 @@ __pycache__/
 data/
 playwright-report/
 test-results/
+
+secrets/
+production.env
+*.dump
+*.jsonl
+
+heartbeat.env

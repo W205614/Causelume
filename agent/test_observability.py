@@ -81,6 +81,30 @@ class ObservabilityTests(unittest.TestCase):
                 self.assertEqual(result.status_code, status)
         self.assertFalse(self.args)
 
+    def test_future_tail_uses_one_effective_cutoff_for_both_real_requests(self):
+        sampled_at = "2026-11-01T04:05:00.000+00:00"
+        request_body = {**self.body, "windowEnd": "2026-11-01T04:10:00Z"}
+        with patch("observability.timestamp", return_value=sampled_at):
+            result = self.client.post("/investigate", json=request_body, headers=auth("fixture-agent")).json
+        self.assertEqual(result["completeness"], "partial")
+        self.assertIn("未来", result["limitation"])
+        self.assertEqual(result["requestedRange"]["end"], "2026-11-01T04:10:00.000+00:00")
+        self.assertEqual(result["sampledAt"], result["effectiveRange"]["end"])
+        self.assertEqual(self.args["metric"]["time"], sampled_at)
+        self.assertIn("[300000ms]", self.args["metric"]["query"])
+        self.assertEqual(int(self.args["logs"]["end"]), 1793505900000000001)
+        for view in result["observations"].values():
+            self.assertTrue(view["windowPending"])
+            self.assertEqual((view["completeness"], view["windowEnd"]), ("partial", sampled_at))
+
+    def test_future_only_window_does_not_query_sources(self):
+        with patch("observability.timestamp", return_value="2026-11-01T03:59:59.999+00:00"):
+            result = self.client.post("/investigate", json=self.body, headers=auth("fixture-agent")).json
+        self.assertFalse(self.args)
+        self.assertEqual(result["completeness"], "partial")
+        self.assertIsNone(result["effectiveRange"])
+        self.assertTrue(all(v["status"] == "pending" and v["query"] is None for v in result["observations"].values()))
+
     def test_one_failing_source_preserves_other_source(self):
         refused = Flask("redirect-source")
 

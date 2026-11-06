@@ -1,0 +1,28 @@
+{
+	admin off
+	auto_https off
+}
+:9090 {
+	@read {
+		method GET
+		path /api/v1/query /api/v1/query_range /-/ready
+	}
+	handle @read {
+		reverse_proxy prometheus:9090
+	}
+	handle {
+		respond 403
+	}
+}
+:3100 {
+	@read {
+		method GET
+		path /ready /loki/api/v1/query_range
+	}
+	handle @read {
+		reverse_proxy loki:3100
+	}
+	handle {
+		respond 403
+	}
+}

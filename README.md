@@ -23,64 +23,69 @@
 
 </details>
 
-## 首次部署
+## 本地体验与个人生产候选
 
-准备 Git、Docker Desktop（Linux 容器）、Docker Compose v2 和 Python 3.11+。容器构建需要访问镜像仓库及软件包仓库。
+本地 Docker Desktop 体验沿用 H2 和 checkout 示例：
 
 ~~~sh
-git clone https://github.com/W205614/Causelume.git
-cd Causelume
 python scripts/init_env.py
 docker compose up -d --build --wait
-docker compose ps
 ~~~
 
-打开 [运维控制台](http://127.0.0.1:18760)，用 admin 或 operator 登录。初始密码分别取本机 .env 内的 APP_ADMIN_PASSWORD、APP_OPERATOR_PASSWORD。初始化脚本生成独立随机凭据；.env 已存在时会停止。默认只向本机回环地址发布控制台和 [演示 checkout](http://127.0.0.1:18761/health)。
+打开 [控制台](http://127.0.0.1:18760)，从本机 .env 读取 admin 或 operator 初始密码。已有 .env 会保留，已有 H2 数据留在项目业务卷。升级前先备份并按 [迁移说明](backend/STORAGE.md) 核对新数据库，生产迁移不会自动覆盖本地库。
 
-## 完成一条调查
+本轮还提供 Linux 单机生产候选，使用 PostgreSQL 18、强制 TOTP、邮件与站内通知、Prometheus/Alertmanager/Loki/Alloy、人工预算调查、Caddy HTTPS 和加密备份。外部资源尚未配置时，候选代码仍可在隔离环境完成验收。实测及尚未运行项见 [个人版验收](docs/personal-release.md)。
 
-1. 在告警中心录入告警并建单，或在工单列表直接创建。按服务、负责人或状态找到目标工单。
-2. 管理员分派给值班人员，负责人开始处理。工单详情展示处理记录、关联调查和当前可执行操作。
-3. 在 checkout 上有请求样本后发起调查。查看观察来源、快照时间、可能原因、不确定性与建议，提交核对反馈。
-4. 由负责人处理故障，在工单写入恢复验证依据，再关闭并记录复盘。其他人已更新同一工单时，先复核最新状态，再决定是否提交原草稿。
+## 后续接入云主机、域名和外部服务
 
-要在本地测试库中重放整条流程，运行：
+准备好资源后，按照下表填写配置及执行命令即可接入。真实秘密存放在受限文件中。
+
+| 资源 | 填写位置 | 接入与验收 |
+|---|---|---|
+| Linux 云主机 | 部署目录 /opt/causelume，Docker Engine/Compose，防火墙 | 拉取已验证提交、下载发布镜像，检查磁盘与资源；备份旧部署后运行发布脚本。只对外发布 80/443。 |
+| 域名与 TLS | production.env 的 APP_DOMAIN、ACME_EMAIL | 将 DNS 指向主机，放通 80/443，Caddy 自动申请并续期证书；访问真实域名验证 Cookie、MFA、证书与重定向。 |
+| SMTP | production.env 的 SMTP_HOST/PORT/USERNAME/FROM，secrets/SMTP_PASSWORD | 使用服务商授权凭据。登录账户安全页设置收件邮箱；发出测试通知，核对实际收件和投递状态。 |
+| 异地备份 | production.env 的 RESTIC_REPOSITORY，secrets/RESTIC_PASSWORD、AWS_ACCESS_KEY_ID、AWS_SECRET_ACCESS_KEY | 初始化专用 restic 仓库，执行首次备份、隔离恢复；再启用每12小时备份与每月恢复演练定时器。 |
+| 外部探测 | heartbeat.env、production.env 的 BACKUP_HEARTBEAT_URL | 在机外心跳服务创建独立的运行与备份检查。配置周期/宽限，停止心跳验证告警。勿把探测服务部署在同一台主机。 |
+| 真实模型 | secrets/OPENAI_API_KEY、AGENT_MODE=holmes、COMPOSE_PROFILES=holmes、预算变量 | 先轮换曾在聊天出现的旧密钥，填写预算预留和每日额度。真实调查需人工发起；供应商账单未知时额度保持冻结。 |
+| 实际应用 | 服务目录和 deployment/observability 配置 | 注册 Prom 抓取目标和 Alloy 日志标签；在页面绑定批准的 prom-loki 数据源、serviceLabel 与 environment，检测连接后演练一次真实故障。 |
+
+首次准备服务器配置：
 
 ~~~sh
-python scripts/e2e.py --env-file .env
+cp production.env.example production.env
+python scripts/init_production.py
 ~~~
 
-这条命令要求运行中的部署使用 offline。脚本以测试操作者身份注入 checkout 故障、实测 503、派工、调查、恢复并实测 200，最后写入已关闭的工单、证据和审计记录。请在允许写入演示记录的环境中串行执行。独立前端模拟页只改内存，适合纯界面体验。
+编辑 production.env 和 secrets/ 外部凭据文件。保管 APP_MFA_KEY 与 restic 恢复密码的独立恢复副本。生产账户的首次绑定及恢复见 [账户与数据迁移](backend/STORAGE.md)。
 
-## 架构和配置
+发布工作流支持手动触发或 v* 标签。下载 release-manifest，将已验证的 app/agent 镜像摘要填入 APP_IMAGE、AGENT_IMAGE，APP_RELEASE 填提交号。发布前查看安全扫描结果，运行：
 
-| 组件 | 职责与边界 |
-|---|---|
-| 浏览器控制台 | 原生 ES modules，同源会话。分页查询工单、告警和任务；进入详情后加载证据。进行中的调查可自动或手动刷新。 |
-| Java 21 / Spring Boot | 认证授权、服务目录、重复告警、工单幂等与乐观锁、派工、调查队列、时间线与审计。Spring JDBC 和 Flyway 管理 H2 文件数据库。 |
-| Python 调查服务 | 在一个采样窗口冻结 checkout 观察数据。offline 使用规则，holmes 交给固定版本的 HolmesGPT；服务端校验并保存结果。 |
-| checkout | 独立示例服务。用容量为 1 的许可池复现失败，保留最近 50 条请求。故障控制使用独立凭据。 |
+~~~sh
+docker compose --env-file production.env -f compose.production.yaml -f compose.observability.yaml config --quiet
+sudo sh scripts/release.sh
+~~~
 
-| 环境变量 | 填写与用途 |
-|---|---|
-| APP_ADMIN_PASSWORD、APP_OPERATOR_PASSWORD | 首次建库时创建账号。已初始化的账号从命名卷读取。 |
-| AGENT_TOKEN、EVIDENCE_TOKEN、DEMO_CONTROL_TOKEN | 分别授权发起调查、读取证据和操作**演示服务**。由初始化脚本生成。 |
-| AGENT_MODE、HOLMES_API_KEY | 默认 offline；切换 holmes 时，使用独立的 Holmes 内部 API 凭据。 |
-| OPENAI_API_KEY | 仅真实模型模式需要。官方模型地址为 `https://api.openai.com/v1`，模型为 `gpt-6.1-sol`。 |
-| APP_PORT、CHECKOUT_PORT | 本机端口，默认 18760 和 18761；更改后用 --app、--checkout 指定验收地址。 |
-| APP_PUBLIC_ORIGIN | 本地 HTTP 留空。由受控 HTTPS 代理提供服务时填写唯一公开 origin，例如 `https://ops.example.com`。 |
+发布脚本默认在 /opt/causelume 运行。已有实例更新时先执行加密备份，再迁移和检查健康。首次部署需要先初始化 restic 仓库，后续启用备份定时器。外部资源的详细接入、恢复及回退操作见 [生产接入手册](docs/production-setup.md)。
 
-真实模型模式需要自行在服务端 .env 配置 OPENAI_API_KEY、AGENT_MODE=holmes 和 COMPOSE_PROFILES=holmes，然后执行 `docker compose up -d --build --wait`。确认数据发送范围及费用后，再从工单发起调查。手工使用脚本验证付费调查需显式传入 `--expect-mode holmes`。CI 使用离线模式。
+## 日常故障处理
 
-## 已有部署与升级
+1. Alertmanager 的发生事件按集成、fingerprint、startsAt 去重，自动创建并分派工单。恢复事件记录监控恢复，由负责人确认工单关闭。
+2. 通知中心显示站内消息和邮件状态；管理员可检查失败及结果未知的投递。维护静默会继续记录告警。
+3. 工单负责人发起只读调查，查看查询时间范围、来源、采集时间、截断和证据完整性。模型不持有生产修复权限。
+4. 写入通过、失败或未知的恢复依据；完成结构化复盘、改进事项、授权导出。必要时可重新打开工单。
 
-日常停止和恢复使用 `docker compose stop`、`docker compose start`。业务库位于项目名对应的 business 命名卷，默认名为 causelume_business。查看进程状态可运行 `docker compose ps`，数据库健康状态见 [/api/health](http://127.0.0.1:18760/api/health)。
+服务支持编辑、停用、环境、负责人、运行手册和批准数据源绑定。账户支持密码管理、TOTP、单次恢复码和会话撤销。费用核对、清理预览、MFA 和账户管理只向相应权限开放。历史数据清理仅提供预览。
 
-升级会执行新的 Flyway 迁移并短暂中断服务。先核对当前 Git 提交、镜像、.env、实际卷和备份；安排维护窗口，停止写入，制作一致备份并在隔离副本上演练恢复。确认后再拉取新提交、构建、启动并复查历史工单。应用回滚须配合兼容的数据库状态。保留原 .env，本机的凭据和数据不进入仓库。[上线与维护边界](docs/operations.md)
+## 架构与运行边界
 
-## 开发与测试
+Java 21/Spring Boot/Spring JDBC 负责业务、权限、持久化与任务；Python 与 HolmesGPT 负责采集和分析。生产采用 PostgreSQL，应用账号与迁移账号分离。查询网关只放行 Prometheus/Loki 的 GET 查询入口，观测采集接口处于内部网络。
 
-需要 JDK 21、Maven 3.9、Python 3.11+、Node.js 22 和 Chromium。在仓库根目录运行：
+每次调查冻结服务范围及时间窗口。来源缺失、无样本或模型失败会显式报告。真实模型默认关闭；开启后需每日额度和单次预留，费用未知需管理员核对，预算预留不等同于供应商硬账单上限。
+
+生产候选面向单实例、个人少量项目。RPO 24小时和 RTO 2小时是待真实异地恢复演练确认的目标。容量需按首批项目负载实测。升级数据库后回退需采用兼容应用版本或完整恢复集。
+
+## 开发与复验
 
 ~~~sh
 python -m pip install -r agent/requirements.txt
@@ -92,15 +97,13 @@ cd ..
 mvn -f backend/pom.xml verify
 python -m unittest discover -s agent -p "test*.py"
 python scripts/verify_local.py
+python scripts/verify_postgres.py
+python scripts/verify_backup.py
+python agent/verify_observability.py
+python agent/verify_alertmanager.py
+python scripts/verify_candidate.py
 ~~~
 
-可通过 CAUSELUME_BROWSER 指定本机 Edge 或 Chromium 可执行文件。verify_local.py 使用临时账户、回环端口、空内存库及真实浏览器进行联调。
+可用 CAUSELUME_BROWSER 指定本机 Edge/Chromium，Windows 的 Maven 路径可通过 --maven 指定。候选脚本会创建有独立名称的临时测试环境，使用合成数据、Mailpit 和离线调查。生产密钥及本地业务卷不参与自动测试。
 
-## 常见问题
-
-- **调查显示证据不足**　先对 checkout 发起一次业务请求，再检查服务目录里的指标与日志。其他服务需要先登记其只读工具。
-- **工单提交返回 409**　比较最新状态、版本和草稿。只有复核后仍符合状态规则的操作才能再次提交。
-- **等待中的调查和运行中断有什么区别？**　单 worker 依次领取等待任务。已领取而结果未知的付费任务会记录失败原因；再次调查需由操作者决定。
-- **改了 .env 密码仍不能登录**　初始密码用于首次建库；已有用户密码哈希保存在数据库。先确认使用了对应部署和账号。
-
-[业务 API 与状态转换](backend/API.md) · [调查协议与快照](agent/README.md) · [前端与浏览器测试](frontend/README.md) · [参考与架构决策](docs/implementation.md) · [验收记录](docs/verification.md) · [本轮审查与截图来源](docs/review-2026-11-06.md) · [上线差距](docs/operations.md)
+[业务 API](backend/API.md) · [账户与数据迁移](backend/STORAGE.md) · [告警与通知](backend/ALERTING.md) · [工单与复盘](backend/INCIDENTS.md) · [只读观测](agent/README.md) · [观测接入](deployment/observability/README.md) · [生产接入](docs/production-setup.md) · [候选验收](docs/personal-release.md)

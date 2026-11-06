@@ -1,0 +1,17 @@
+{
+	email {$ACME_EMAIL}
+	admin off
+}
+{$APP_DOMAIN} {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		Strict-Transport-Security "max-age=31536000"
+	}
+	@private path /actuator* /api/integrations/*
+	respond @private 404
+	reverse_proxy app:8080
+}

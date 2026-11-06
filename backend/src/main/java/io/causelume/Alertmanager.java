@@ -44,7 +44,7 @@ class Alertmanager {
         String state=Problem.choice(event.path("status").asString(""),java.util.Set.of("firing","resolved"),"status");
         var labels=event.path("labels");
         String name=Problem.text(labels.path("service").asString(""),100,"labels.service");
-        var service=store.one("select id,owner_id from services where name=? for update",name);
+        var service=store.one("select id,owner_id,active from services where name=? for update",name);
         long serviceId=(long)service.get("id");
         String fingerprint=Problem.text(event.path("fingerprint").asString(""),100,"fingerprint");
         java.time.OffsetDateTime start=timestamp(event,"startsAt");
@@ -63,6 +63,7 @@ class Alertmanager {
                 var tickets=store.rows("select id from tickets where alert_id=?",id);
                 if(!tickets.isEmpty()) {
                     long ticketId=(long)tickets.getFirst().get("id");
+                    store.db.update("update tickets set version=version+1 where id=?",ticketId);
                     store.db.update("insert into timeline(ticket_id,action,actor,note) values (?,'ALERT_RESOLVED',?,?)",
                         ticketId,"alertmanager","监控已恢复，仍需人工验证工单");
                     notifications.notifyTicket(ticketId,"ALERT_RESOLVED","监控收到恢复信号，请人工核验工单 #"+ticketId);
@@ -70,6 +71,7 @@ class Alertmanager {
             }
             return id;
         }
+        if(!Boolean.TRUE.equals(service.get("active")) && end==null)throw new Problem(409,"服务已停用");
         String title=Problem.text(event.path("annotations").path("summary").asString(labels.path("alertname").asString("")),200,"告警标题");
         String severity=switch(labels.path("severity").asString("info").toLowerCase(Locale.ROOT)) {
             case "critical","fatal","high" -> "CRITICAL";

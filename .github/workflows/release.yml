@@ -1,0 +1,41 @@
+name: Publish candidate images
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+  packages: write
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release images
+        run: |
+          docker build -t ghcr.io/w205614/causelume-app:${GITHUB_SHA} .
+          docker build -t ghcr.io/w205614/causelume-agent:${GITHUB_SHA} agent
+      - name: Scan application images
+        run: |
+          docker save ghcr.io/w205614/causelume-app:${GITHUB_SHA} -o /tmp/app.tar
+          docker save ghcr.io/w205614/causelume-agent:${GITHUB_SHA} -o /tmp/agent.tar
+          for image in app agent; do
+            docker run --rm -v /tmp:/scan:ro aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}.tar --exit-code 1 --severity HIGH,CRITICAL
+          done
+      - name: Push and record immutable references
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push ghcr.io/w205614/causelume-app:${GITHUB_SHA}
+          docker push ghcr.io/w205614/causelume-agent:${GITHUB_SHA}
+          docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/w205614/causelume-app:${GITHUB_SHA} > app-image.txt
+          docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/w205614/causelume-agent:${GITHUB_SHA} > agent-image.txt
+          printf '%s\n' "$GITHUB_SHA" > commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest
+          path: |
+            app-image.txt
+            agent-image.txt
+            commit.txt

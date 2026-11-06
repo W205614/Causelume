@@ -1,0 +1,215 @@
+# Linux production candidate. Copy production.env.example and generate secret files first.
+name: causelume
+x-runtime: &runtime
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+services:
+  initlogs:
+    image: ${AGENT_IMAGE:?required}
+    user: "0:0"
+    entrypoint: ["python", "-c"]
+    command: ["import os; os.makedirs('/var/log/causelume',exist_ok=True); os.chmod('/var/log/causelume',0o777)"]
+    volumes: [logs:/var/log/causelume]
+    network_mode: none
+
+  postgres:
+    <<: *runtime
+    image: postgres:18.6-bookworm@sha256:f1ea2a1a4fb7b68d4836be1fdcb8a6466a89b072158bf9d97663600538c294c5
+    environment:
+      POSTGRES_DB: causelume
+      POSTGRES_USER: causelume_owner
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
+    volumes:
+      - postgres:/var/lib/postgresql
+      - ./deployment/postgres/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    secrets: [POSTGRES_PASSWORD, APP_DB_PASSWORD, APP_MIGRATOR_PASSWORD]
+    networks: [database]
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U causelume_owner -d causelume"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    <<: *runtime
+    image: ${APP_IMAGE:?set the tested release image digest}
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/secrets/
+      APP_DB_URL: jdbc:postgresql://postgres:5432/causelume
+      APP_DB_USER: causelume_app
+      SPRING_FLYWAY_USER: causelume_migrator
+      APP_PUBLIC_ORIGIN: https://${APP_DOMAIN:?required}
+      AGENT_URL: http://agent:8091
+      AGENT_MODE: ${AGENT_MODE:-offline}
+      MODEL_DAILY_BUDGET_USD: ${MODEL_DAILY_BUDGET_USD:-}
+      MODEL_RESERVATION_USD: ${MODEL_RESERVATION_USD:-}
+      MANAGEMENT_SERVER_PORT: "9091"
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,prometheus
+      LOGGING_FILE_NAME: /var/log/causelume/app.log
+      SPRING_MAIL_HOST: ${SMTP_HOST:?required}
+      SPRING_MAIL_PORT: ${SMTP_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SMTP_USERNAME:?required}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: "true"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_CONNECTIONTIMEOUT: "5000"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_TIMEOUT: "5000"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_WRITETIMEOUT: "5000"
+      APP_SMTP_FROM: ${SMTP_FROM:?required}
+    secrets: [APP_DB_PASSWORD, APP_MIGRATOR_PASSWORD, APP_ADMIN_PASSWORD, APP_OPERATOR_PASSWORD, APP_MFA_KEY, AGENT_TOKEN, MANAGEMENT_TOKEN, ALERTMANAGER_TOKEN, spring.mail.password]
+    volumes: [logs:/var/log/causelume]
+    networks: [edge, database, backend, telemetry]
+    depends_on:
+      postgres: {condition: service_healthy}
+      initlogs: {condition: service_completed_successfully}
+      agent: {condition: service_healthy}
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /api/health HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3; head -1 <&3 | grep -q ' 200 '"]
+      interval: 10s
+      timeout: 4s
+      retries: 15
+      start_period: 30s
+
+  agent:
+    <<: *runtime
+    image: ${AGENT_IMAGE:?set tested agent image digest}
+    environment:
+      BIND_HOST: 0.0.0.0
+      AGENT_MODE: ${AGENT_MODE:-offline}
+      AGENT_TOKEN_FILE: /run/secrets/AGENT_TOKEN
+      SOURCE_REGISTRY_FILE: /etc/causelume/sources.json
+      HOLMES_URL: http://holmes:5050
+      HOLMES_API_KEY_FILE: /run/secrets/HOLMES_API_KEY
+    secrets: [AGENT_TOKEN, HOLMES_API_KEY]
+    volumes: [./deployment/observability/sources.json:/etc/causelume/sources.json:ro]
+    networks: [backend, query]
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health',timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  caddy:
+    <<: *runtime
+    image: caddy:2.11.9-alpine@sha256:71d41fe4b1ae92a058abc87afe614178b996d8a6b96d0f4c71ae30606e5927e3
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?required}
+      ACME_EMAIL: ${ACME_EMAIL:?required}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deployment/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    networks: [edge]
+    depends_on: [app]
+    mem_limit: 128m
+
+
+  query-gateway:
+    <<: *runtime
+    image: caddy:2.11.9-alpine@sha256:71d41fe4b1ae92a058abc87afe614178b996d8a6b96d0f4c71ae30606e5927e3
+    volumes: [./deployment/caddy/query.Caddyfile:/etc/caddy/Caddyfile:ro]
+    networks: [query, telemetry]
+    mem_limit: 64m
+
+  holmes:
+    <<: *runtime
+    profiles: [holmes]
+    image: robustadev/holmes:0.46.0@sha256:bec9d14eea6a8890ba498c91ab47adcce3af9b6d0c6ee26d642d4e3e0df6218e
+    entrypoint: ["sh", "-ec"]
+    command: ["export HOLMES_API_KEY=$$(cat /run/secrets/HOLMES_API_KEY); export OPENAI_API_KEY=$$(cat /run/secrets/OPENAI_API_KEY); exec python -u server.py"]
+    environment:
+      LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES: "true"
+      OPENAI_BASE_URL: https://api.openai.com/v1
+      HOLMES_CONFIGPATH_DIR: /etc/causelume
+      OVERRIDE_MAX_CONTENT_SIZE: "16384"
+      OVERRIDE_MAX_OUTPUT_TOKEN: "1200"
+      ENABLE_CONVERSATION_HISTORY_COMPACTION: "false"
+    secrets: [HOLMES_API_KEY, OPENAI_API_KEY]
+    volumes: [./agent/holmes-observations.yaml:/etc/causelume/config.yaml:ro]
+    networks: [backend, edge]
+    mem_limit: 1536m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5050/healthz',timeout=2)"]
+      interval: 15s
+      timeout: 4s
+      retries: 10
+
+  backup:
+    profiles: [maintenance]
+    build: ./deployment/backup
+    environment:
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:?required}
+      APP_RELEASE: ${APP_RELEASE:?required}
+      BACKUP_HEARTBEAT_URL: ${BACKUP_HEARTBEAT_URL:-}
+    secrets: [APP_MIGRATOR_PASSWORD, RESTIC_PASSWORD, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]
+    volumes:
+      - backup-work:/work
+      - ./secrets:/config/secrets:ro
+      - ./production.env:/config/production.env:ro
+    networks: [database, edge]
+
+  restore-postgres:
+    profiles: [restore]
+    image: postgres:18.6-bookworm@sha256:f1ea2a1a4fb7b68d4836be1fdcb8a6466a89b072158bf9d97663600538c294c5
+    environment:
+      POSTGRES_DB: causelume
+      POSTGRES_USER: causelume_owner
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
+    secrets: [POSTGRES_PASSWORD, APP_DB_PASSWORD, APP_MIGRATOR_PASSWORD]
+    volumes:
+      - ./deployment/postgres/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    tmpfs: ["/var/lib/postgresql:size=1G"]
+    networks: [restore]
+    mem_limit: 1536m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U causelume_owner -d causelume"]
+      interval: 3s
+      retries: 20
+
+  restore-check:
+    profiles: [restore]
+    build: ./deployment/backup
+    entrypoint: ["/usr/local/bin/restore-check"]
+    environment:
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:?required}
+    secrets: [APP_DB_PASSWORD, APP_MIGRATOR_PASSWORD, RESTIC_PASSWORD, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]
+    tmpfs: ["/restore:size=1G"]
+    networks: [restore, edge]
+    depends_on:
+      restore-postgres: {condition: service_healthy}
+
+networks:
+  database: {internal: true}
+  backend: {internal: true}
+  telemetry: {internal: true}
+  query: {internal: true}
+  restore: {internal: true}
+  edge: {}
+
+volumes:
+  postgres: {}
+  logs: {}
+  caddy: {}
+  backup-work: {}
+
+secrets:
+  POSTGRES_PASSWORD: {file: ./secrets/POSTGRES_PASSWORD}
+  APP_DB_PASSWORD: {file: ./secrets/APP_DB_PASSWORD}
+  APP_MIGRATOR_PASSWORD: {file: ./secrets/APP_MIGRATOR_PASSWORD}
+  APP_ADMIN_PASSWORD: {file: ./secrets/APP_ADMIN_PASSWORD}
+  APP_OPERATOR_PASSWORD: {file: ./secrets/APP_OPERATOR_PASSWORD}
+  APP_MFA_KEY: {file: ./secrets/APP_MFA_KEY}
+  AGENT_TOKEN: {file: ./secrets/AGENT_TOKEN}
+  MANAGEMENT_TOKEN: {file: ./secrets/MANAGEMENT_TOKEN}
+  ALERTMANAGER_TOKEN: {file: ./secrets/ALERTMANAGER_TOKEN}
+  HOLMES_API_KEY: {file: ./secrets/HOLMES_API_KEY}
+  spring.mail.password: {file: ./secrets/SMTP_PASSWORD}
+  RESTIC_PASSWORD: {file: ./secrets/RESTIC_PASSWORD}
+  AWS_ACCESS_KEY_ID: {file: ./secrets/AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: {file: ./secrets/AWS_SECRET_ACCESS_KEY}
+  OPENAI_API_KEY: {file: ./secrets/OPENAI_API_KEY}

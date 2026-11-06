@@ -220,8 +220,7 @@ def read_view(kind, profile, labels, start, end):
             for ns, line in sorted(entries, key=lambda r: r[0], reverse=True)[:LOG_LIMIT]:
                 view["samples"].append({"timestampNs": str(ns), **safe_log(line)})
         partial = view["truncated"] or bool(reply.get("warnings"))
-        view["windowPending"] = end > datetime.now(timezone.utc)
-        partial = partial or view["windowPending"] or (bool(view["samples"]) and bool(view.get("missingSignals")))
+        partial = partial or (bool(view["samples"]) and bool(view.get("missingSignals")))
         view.update(status="ok" if view["samples"] else "empty", completeness="partial" if partial else "complete")
     except (SourceError, KeyError, IndexError, TypeError, ValueError) as exc:
         view.update(status="error", completeness="partial", samples=[],
@@ -238,18 +237,36 @@ def observe(profile, body):
     end = end.replace(microsecond=end.microsecond // 1000 * 1000)
     if not timedelta(0) < end - start <= timedelta(hours=24):
         abort(400, "采样窗口须大于零且不超过 24 小时")
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        jobs = [executor.submit(read_view, kind, profile, labels, start, end) for kind in (PROM, LOKI)]
-        metrics, logs = [job.result() for job in jobs]
-    views = {"metrics": metrics, "logs": logs}
+    sampled_at = timestamp()
+    effective_end = min(end, datetime.fromisoformat(sampled_at))
+    pending = effective_end < end
+    requested = {"start": start.isoformat(timespec="milliseconds"), "end": end.isoformat(timespec="milliseconds")}
+    effective = None
+    if start < effective_end:
+        effective = {"start": requested["start"], "end": effective_end.isoformat(timespec="milliseconds")}
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            jobs = [executor.submit(read_view, kind, profile, labels, start, effective_end) for kind in (PROM, LOKI)]
+            metrics, logs = [job.result() for job in jobs]
+        views = {"metrics": metrics, "logs": logs}
+    else:
+        # No elapsed interval exists. In particular, never send a zero-length range to Prometheus.
+        views = {key: {"source": kind, "query": None, "windowStart": None, "windowEnd": None, "collectedAt": None,
+                       "status": "pending", "samples": [], "truncated": False, "completeness": "partial"}
+                 for key, kind in (("metrics", PROM), ("logs", LOKI))}
+    for view in views.values():
+        view["windowPending"] = pending
+        if pending:
+            view["completeness"] = "partial"
     if all(v["status"] == "empty" and v["completeness"] == "complete" for v in views.values()):
         state = "empty"
     else:
         state = "complete" if all(v["status"] == "ok" and v["completeness"] == "complete"
                                   for v in views.values()) else "partial"
-    return {"snapshotId": uuid4().hex, "sampledAt": timestamp(), "service": body["service"],
-            "environment": body["environment"], "sourceId": profile["id"], "windowStart": metrics["windowStart"],
-            "windowEnd": metrics["windowEnd"], "completeness": state, "observations": views,
+    return {"snapshotId": uuid4().hex, "sampledAt": sampled_at, "service": body["service"],
+            "environment": body["environment"], "sourceId": profile["id"], "requestedRange": requested,
+            "effectiveRange": effective, "windowStart": views["metrics"]["windowStart"],
+            "windowEnd": views["metrics"]["windowEnd"], "completeness": state, "observations": views,
+            "limitation": "申请窗口含未来时段，只能分析采样时已发生的部分。" if pending else None,
             "evidence": [{"source": v["source"], "detail": json.dumps(
                 {k: v[k] for k in ("status", "truncated", "samples", "error") if k in v},
                 ensure_ascii=False, separators=(",", ":"))} for v in views.values()]}

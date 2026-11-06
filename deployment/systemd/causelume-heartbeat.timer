@@ -1,0 +1,9 @@
+[Unit]
+Description=Verify the public path every minute
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=60
+
+[Install]
+WantedBy=timers.target

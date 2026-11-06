@@ -578,6 +578,7 @@ export function taskDetail(t, { tickets, admin, actorId }) {
     summary +
     (events ? '<div class="stage-times">' + events + "</div>" : "") +
     error +
+    (r?.limitation ? '<p class="retry">' + esc(r.limitation) + '</p>' : "") +
     (r?.usage ? '<div class="snapshot">模型 ' + esc(r.usage.model || "未调用") + ' · 模板 ' + esc(r.usage.promptVersion || "未知") +
       ' · 输入 token ' + esc(r.usage.inputTokens ?? "未知") + ' · 输出 token ' + esc(r.usage.outputTokens ?? "未知") +
       ' · 费用 $' + esc(r.usage.costUsd ?? "待供应商核对") + '</div>' : "") +

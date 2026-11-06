@@ -1,0 +1,9 @@
+[Unit]
+Description=Rehearse Causelume recovery each month
+
+[Timer]
+OnCalendar=monthly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

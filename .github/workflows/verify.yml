@@ -61,3 +61,63 @@ jobs:
       - run: docker compose --profile holmes config --quiet
       - run: docker compose up --build --wait --wait-timeout 150
       - run: python scripts/e2e.py --env-file .env
+      - name: Scan candidate images
+        run: |
+          mkdir -p /tmp/image-scan
+          docker save causelume-app -o /tmp/image-scan/app.tar
+          docker save causelume-agent -o /tmp/image-scan/agent.tar
+          for image in app agent; do
+            docker run --rm -v /tmp/image-scan:/scan aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/function () { [native code] }.tar --format json --output /scan/function () { [native code] }.json --severity HIGH,CRITICAL --exit-code 1
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-image-scan
+          path: /tmp/image-scan/*.json
+
+  postgres:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - run: python scripts/verify_postgres.py
+      - run: mvn -B -f backend/pom.xml -DskipTests package
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r agent/requirements.txt
+      - run: python scripts/verify_candidate.py
+      - run: python scripts/verify_backup.py
+
+  observability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r agent/requirements.txt
+      - run: python agent/verify_observability.py
+      - run: python agent/verify_alertmanager.py
+      - run: docker compose --env-file production.env.example -f compose.production.yaml -f compose.observability.yaml --profile maintenance --profile restore config --quiet
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: npm ci && npm audit --audit-level=high
+        working-directory: frontend
+      - run: python -m pip install pip-audit && pip-audit -r agent/requirements.txt
+      - name: Check repository secrets
+        run: docker run --rm -v "$PWD:/source:ro" aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb fs --scanners secret --exit-code 1 /source

@@ -1,0 +1,11 @@
+[Unit]
+Description=Causelume isolated monthly recovery rehearsal
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/causelume
+UMask=0077
+ExecStart=/usr/bin/docker compose --env-file production.env -f compose.production.yaml --profile restore run --rm restore-check
+ExecStopPost=/usr/bin/docker compose --env-file production.env -f compose.production.yaml --profile restore stop restore-postgres
