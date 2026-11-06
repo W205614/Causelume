@@ -38,7 +38,7 @@ def start(stack, cmd, settings, url):
         try:
             with request.urlopen(url, timeout=1):
                 return
-        except URLError:
+        except (URLError, TimeoutError):
             time.sleep(.25)
     raise TimeoutError(url)
 

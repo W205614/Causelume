@@ -40,7 +40,7 @@ def ready(url):
     try:
         with urlopen(url, timeout=3) as response:
             return response.status == 200
-    except (URLError, ConnectionError):
+    except (URLError, ConnectionError, TimeoutError):
         return False
 
 
