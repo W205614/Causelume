@@ -44,7 +44,7 @@ docker compose ps
 | AGENT_MODE | offline 或 holmes |
 | APP_PORT / CHECKOUT_PORT | 本地端口，默认 18760 / 18761 |
 
-变更宿主端口时，给演示命令传入 --app 和 --checkout 对应地址。真实 .env、数据库、缓存都由 Git 忽略。Holmes 配置固定为官方 https://api.openai.com/v1 和 gpt-6.1-sol，使用 Responses API 调用工具，最多 4 个调查步骤。只在确认模型和费用后将 AGENT_MODE 设为 holmes、配置相应凭据，并运行 docker compose --profile holmes up -d --wait。启用后发起调查可能产生费用。模型不可用时任务会记录失败。
+变更宿主端口时，给演示命令传入 --app 和 --checkout 对应地址。真实 .env、数据库、缓存都由 Git 忽略。Holmes 配置固定为官方 https://api.openai.com/v1 和 gpt-6.1-sol，使用 Responses API 调用工具，最多 4 个调查步骤。只在确认模型和费用后将 AGENT_MODE 设为 holmes、配置相应凭据，并运行 docker compose --profile holmes up -d --wait。若需使以后不带 --profile 的启停命令也包含 Holmes，可在本机 .env 设置 COMPOSE_PROFILES=holmes。本次本机部署已设置。启用后发起调查可能产生费用。模型不可用时任务会记录失败。
 
 ## 本地开发和验收
 
@@ -64,4 +64,4 @@ python scripts/verify_local.py
 
 如要复用本机 Edge / Chromium，可设置 CAUSELUME_BROWSER 为浏览器可执行文件的绝对路径。verify_local.py 使用已打包的 JAR、空内存数据库、临时凭据和回环端口启动三个进程，退出时停止这些进程。部署用的持久化数据库与开发验收隔离。
 
-阶段范围、来源版本和复用决策见 [实施记录](docs/implementation.md)。本项目面向单实例本机演示，真实生产数据源需要单独登记并配置只读工具。
+本机部署实测、真实模型调用与 CI 修复记录见 [验收记录](docs/verification.md)。阶段范围、来源版本和复用决策见 [实施记录](docs/implementation.md)。本项目面向单实例本机演示，真实生产数据源需要单独登记并配置只读工具。
