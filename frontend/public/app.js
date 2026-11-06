@@ -1,4 +1,4 @@
-import { demo, request } from "./mock.js";
+import { demo, investigationAvailable, request } from "./api.js";
 import {
   esc,
   brand,
@@ -95,7 +95,9 @@ async function render() {
   shell(page);
   const main = root.querySelector("main");
   try {
-    const names = ["tickets", "services", "users", "alerts", "tasks"];
+    const names = ["tickets", "services", "users", "alerts"];
+    if (investigationAvailable) names.push("tasks");
+    if (!demo && page === "users" && me.role === "ADMIN") names.push("audit");
     const rows = await Promise.all(names.map((n) => request("/" + n)));
     const t =
       page === "tickets" && id
@@ -104,6 +106,9 @@ async function render() {
     if (epoch !== version) return;
     data = Object.fromEntries(names.map((n, i) => [n, rows[i]]));
     data.admin = me.role === "ADMIN";
+    data.actorId = me.id;
+    data.tasks ??= [];
+    data.investigationAvailable = investigationAvailable;
     ticket = t;
     task =
       page === "tasks" && id

@@ -234,7 +234,7 @@ export const alertsPage = ({ alerts, services, tickets }) =>
       }),
     ),
   );
-export const usersPage = ({ users, admin }) =>
+export const usersPage = ({ users, admin, audit }) =>
   admin
     ? header(pages.users, button("newUser", "＋ 添加用户", true)) +
       panel(
@@ -243,10 +243,28 @@ export const usersPage = ({ users, admin }) =>
           ["编号", "账号", "角色"],
           users.map((u) => [u.id, esc(u.username), esc(label(u.role))]),
         ),
-      )
+      ) +
+      (audit
+        ? panel(
+            "操作审计",
+            table(
+              ["操作者", "操作", "对象编号", "发生时间"],
+              audit.map((entry) => [
+                esc(entry.actor),
+                esc(entry.action),
+                esc(entry.targetId),
+                time(entry.createdAt),
+              ]),
+            ),
+          )
+        : "")
     : header(pages.users) +
       '<div class="retry"><strong>权限不足</strong><p>此页面仅对管理员开放。</p></div>';
-export function tasksPage({ tasks }) {
+export function tasksPage({ tasks, investigationAvailable }) {
+  if (!investigationAvailable)
+    return (
+      header(pages.tasks) + '<p class="empty">Agent 服务将在第三阶段接入。</p>'
+    );
   return (
     header(pages.tasks) +
     panel(
@@ -303,17 +321,24 @@ export function taskDetail(t) {
     panel("调查结果", body + "</div>")
   );
 }
-export function detail(t, { users, services, tasks }) {
+export function detail(
+  t,
+  { users, services, tasks, admin, actorId, investigationAvailable },
+) {
   const next = {
     OPEN: "ASSIGN",
     ASSIGNED: "START",
     PROCESSING: "VERIFY",
     VERIFIED: "CLOSE",
   }[t.status];
-  let actions = next ? button("action:" + next, label(next), true) : "";
-  if (next)
-    actions +=
-      button("action:NOTE", "添加记录") + button("investigate", "发起调查");
+  const canAdvance = admin || (next !== "ASSIGN" && actorId === t.assigneeId);
+  let actions =
+    next && canAdvance ? button("action:" + next, label(next), true) : "";
+  if (admin && t.status === "ASSIGNED")
+    actions += button("action:ASSIGN", "改派");
+  if (next) actions += button("action:NOTE", "添加记录");
+  if (next && investigationAvailable)
+    actions += button("investigate", "发起调查");
   const assignee = users.find((u) => u.id === t.assigneeId);
   const about =
     '<div class="pad"><p>' +

@@ -1,7 +1,7 @@
 # 运维控制台
 
-阶段一所有页面使用浏览器内存中的模拟记录。刷新页面会恢复初始样例。管理员账号为 `admin`，运维账号为 `operator`，两者密码均为 `demo`。页面顶部标记数据来源，调查结果使用合成日志。
+默认入口使用 Java 同源 API 和会话 Cookie。登录、服务、告警、工单、用户及审计接入业务数据库。阶段二的真实入口暂未启用 Agent 调查。
 
-在 frontend 目录运行 `python -m http.server 17643 --bind 127.0.0.1 --directory public`，浏览器打开 http://127.0.0.1:17643/。界面使用标准 ES 模块与浏览器表单、对话框，无前端运行时依赖。
+独立模拟界面位于 `/?demo=1`。所有数据仅存在浏览器内存，刷新会恢复样例。演示账号为 `admin` 或 `operator`，密码均为 `demo`。可在 frontend 目录运行 `python -m http.server 17643 --bind 127.0.0.1 --directory public`，打开 http://127.0.0.1:17643/?demo=1。前端使用原生 ES 模块，无生产运行时依赖。
 
-本地浏览器回归：`npm ci`、`npx playwright install chromium`、`npm test`。也可设置 `CAUSELUME_BROWSER` 为兼容的 Chromium 浏览器可执行文件。测试覆盖模拟账号、页面导航、无权限状态、搜索和完整模拟工单处理。
+执行 `npm ci`、`npx playwright install chromium`、`npm test` 可重放模拟界面测试。可用 `CAUSELUME_BROWSER` 指定 Chromium 可执行文件。对使用临时数据库的 Java 实例，设置 `CAUSELUME_URL` 和 `CAUSELUME_ADMIN_PASSWORD` 后运行 `node tests/live-console.mjs`，会经浏览器创建、派发并关闭一张验收工单。

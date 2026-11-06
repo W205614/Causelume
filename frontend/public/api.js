@@ -1,0 +1,29 @@
+// Demo mode must be selected explicitly. API errors always reach the operator.
+export const demo = new URLSearchParams(location.search).get("demo") === "1";
+export const investigationAvailable = demo;
+const fixture = demo ? await import("./mock.js") : null;
+export async function request(path, body) {
+  if (fixture) return fixture.request(path, body);
+  const response = await fetch(
+    "/api" + path,
+    body === undefined
+      ? {}
+      : {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+  );
+  const json = response.headers
+    .get("content-type")
+    ?.includes("application/json")
+    ? await response.json()
+    : null;
+  if (!response.ok)
+    throw Object.assign(
+      Error(json?.message || "请求失败（HTTP " + response.status + "）"),
+      { status: response.status },
+    );
+  if (json === null) throw Error("服务返回了无法识别的数据。");
+  return json;
+}

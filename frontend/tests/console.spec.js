@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 async function login(page, name = "admin") {
-  await page.goto("/");
+  await page.goto("/?demo=1");
   await page.getByLabel("账号", { exact: true }).fill(name);
   await page.getByLabel("密码", { exact: true }).fill("demo");
   await page.getByRole("button", { name: "登录", exact: true }).click();
