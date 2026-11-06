@@ -37,6 +37,8 @@
 | 真实模型 | 本轮未调用 | 新密钥、预算和明确授权后单独验证 |
 | 容量 | 有边界和资源限制 | 按首批实际项目测延迟、内存、IO与磁盘增长 |
 
+镜像扫描随后拦截了旧 Spring Boot 管理的 Tomcat/Jackson 以及基础镜像 APT 漏洞。按 [Boot 4.1.2](https://github.com/spring-projects/spring-boot/releases/tag/v4.1.2)、[Tomcat安全公告](https://tomcat.apache.org/security-11.html)、[Jackson 3.1.7](https://github.com/FasterXML/jackson/wiki/Jackson-Release-3.1.7) 升级同系列补丁；主应用和观测样例实际JAR均核对依赖。Ubuntu APT 使用 [官方修复版本2.4.15ubuntu0.1](https://ubuntu.com/security/CVE-2026-109518)，更新阶段启用HTTPS并关闭该漏洞涉及的下载重试。扫描仍保留HIGH/CRITICAL阻断门槛。
+
 安全扫描结果以对应 GitHub工作流和报告为准。镜像发布工作流在扫描通过后才推送，不把功能验证当成漏洞扫描。
 
 ## 操作入口

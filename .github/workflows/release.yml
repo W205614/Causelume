@@ -19,9 +19,11 @@ jobs:
         run: |
           docker save ghcr.io/w205614/causelume-app:${GITHUB_SHA} -o /tmp/app.tar
           docker save ghcr.io/w205614/causelume-agent:${GITHUB_SHA} -o /tmp/agent.tar
+          failed=0
           for image in app agent; do
-            docker run --rm -v /tmp:/scan:ro aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}.tar --exit-code 1 --severity HIGH,CRITICAL
+            docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v /tmp:/scan:ro aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}.tar --exit-code 1 --severity HIGH,CRITICAL || failed=1
           done
+          exit "$failed"
       - name: Push and record immutable references
         env:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
