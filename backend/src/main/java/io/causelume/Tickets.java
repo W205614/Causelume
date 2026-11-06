@@ -12,7 +12,8 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/tickets")
 class Tickets {
     final Store store;
-    Tickets(Store store) { this.store=store; }
+    private final Notifications notifications;
+    Tickets(Store store,Notifications notifications) { this.store=store; this.notifications=notifications; }
 
     static final String COLUMNS="id,service_id,alert_id,title,status,assignee_id,version,created_at,review";
     record NewTicket(long serviceId,Long alertId,String title,UUID requestId) {}
@@ -85,6 +86,8 @@ class Tickets {
             next,assignee,action,note,id,input.version);
         if(changed==0) throw new Problem(409,"工单已更新，请刷新");
         record(id,action,note,actor);
+        if(action.equals("ASSIGN") || action.equals("CLOSE"))
+            notifications.notifyTicket(id,action,action.equals("ASSIGN") ? "工单 #"+id+" 已派给你" : "工单 #"+id+" 已关闭");
         return detail(id);
     }
 

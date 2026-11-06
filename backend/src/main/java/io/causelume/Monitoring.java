@@ -15,6 +15,26 @@ class Monitoring {
     Monitoring(Store store) { this.store=store; }
     record Service(String name,String description,String resource) {}
     record Alert(long serviceId,String source,String externalId,String severity,String title,Instant occurredAt) {}
+    record Maintenance(Instant until,String reason) {}
+
+    @PostMapping("/services/{id}/maintenance") @Transactional
+    public Object silence(@PathVariable long id,@RequestBody Maintenance input,HttpServletRequest req) {
+        var actor=Access.actor(req); actor.admin();
+        if(input.until()==null || !input.until().isAfter(Instant.now())) throw new Problem(400,"维护静默必须设置未来的到期时间");
+        if(store.db.update("update services set maintenance_until=?,maintenance_reason=? where id=?",input.until().atOffset(java.time.ZoneOffset.UTC),
+            Problem.text(input.reason(),500,"reason"),id)==0) throw new Problem(404,"服务不存在");
+        store.audit(actor.username(),"MAINTENANCE_START",id);
+        return store.one("select * from services where id=?",id);
+    }
+
+    @PostMapping("/services/{id}/maintenance/end") @Transactional
+    public Object unsilence(@PathVariable long id,HttpServletRequest req) {
+        var actor=Access.actor(req); actor.admin();
+        if(store.db.update("update services set maintenance_until=null,maintenance_reason=null where id=?",id)==0)
+            throw new Problem(404,"服务不存在");
+        store.audit(actor.username(),"MAINTENANCE_END",id);
+        return store.one("select * from services where id=?",id);
+    }
 
     @PostMapping("/services") @Transactional
     public Object service(@RequestBody Service input,HttpServletRequest req) {
@@ -30,6 +50,7 @@ class Monitoring {
     public Object alert(@RequestBody Alert input,HttpServletRequest req) {
         store.one("select id from services where id=?",input.serviceId);
         String source=Problem.text(input.source,100,"source");
+        if(source.startsWith("am/")) throw new Problem(400,"该来源前缀保留给机器入口");
         String externalId=Problem.text(input.externalId,200,"externalId");
         String severity=Problem.choice(input.severity,Set.of("CRITICAL","WARNING","INFO"),"severity");
         String title=Problem.text(input.title,200,"title");

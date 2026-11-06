@@ -61,7 +61,8 @@ class Access implements WebMvcConfigurer, HandlerInterceptor {
                 throw new Problem(415,"写入请求必须使用 application/json");
         }
         String path=req.getRequestURI();
-        if (path.equals("/api/health") || path.equals("/api/login")) return true;
+        if (path.equals("/api/health") || path.equals("/api/login")
+                || (req.getMethod().equals("POST") && path.matches("/api/integrations/alertmanager/[A-Za-z0-9_-]{1,64}"))) return true;
         Actor actor=actor(req);
         var versions=store.rows("select auth_version from accounts where id=? and active=true",actor.id());
         if (versions.isEmpty() || actor.authVersion()!=(long)versions.getFirst().get("authVersion")) {
