@@ -15,8 +15,12 @@ class Accounts {
     final Store store;
     final Environment env;
     final BCryptPasswordEncoder encoder;
-    Accounts(Store store, Environment env, BCryptPasswordEncoder encoder) {
+    final LoginAttempts attempts;
+    final String dummyHash;
+    Accounts(Store store, Environment env, BCryptPasswordEncoder encoder,LoginAttempts attempts) {
         this.store=store; this.env=env; this.encoder=encoder;
+        this.attempts=attempts;
+        this.dummyHash=encoder.encode(java.util.UUID.randomUUID().toString());
     }
 
     @Transactional
@@ -41,12 +45,24 @@ class Accounts {
         return Map.of("status","UP");
     }
     @PostMapping("/login") Actor login(@RequestBody Login login,HttpServletRequest req) {
-        var rows=store.rows("select * from accounts where username=?", Problem.text(login.username,64,"username"));
-        if (login.password==null || login.password.getBytes(StandardCharsets.UTF_8).length>72 || rows.isEmpty()
-            || !encoder.matches(login.password,(String)rows.getFirst().get("passwordHash")))
+        String peer=req.getRemoteAddr();
+        var decision=attempts.check(peer);
+        if (decision!=LoginAttempts.Decision.ALLOW) {
+            if(decision==LoginAttempts.Decision.FIRST_LIMIT) store.audit(peer,"LOGIN_LIMITED",0);
+            throw new Problem(429,"登录请求过多，请在一分钟后重试");
+        }
+        String username=login.username==null ? "" : login.username.strip();
+        var rows=username.length()>64 ? java.util.List.<Map<String,Object>>of()
+                : store.rows("select * from accounts where username=?",username);
+        String hash = rows.isEmpty() ? dummyHash : (String)rows.getFirst().get("passwordHash");
+        if (login.password==null || login.password.getBytes(StandardCharsets.UTF_8).length>72
+            || !encoder.matches(login.password,hash) || rows.isEmpty()) {
+            store.audit(peer,"LOGIN_DENIED",0);
             throw new Problem(401,"用户名或密码错误");
+        }
         var row=rows.getFirst();
         var actor=new Actor((long)row.get("id"),(String)row.get("username"),(String)row.get("role"));
+        store.audit(actor.username(),"LOGIN",actor.id());
         if (req.getSession(false)!=null) req.getSession(false).invalidate();
         req.getSession(true).setAttribute("actor",actor);
         return actor;
@@ -54,13 +70,10 @@ class Accounts {
 
     @GetMapping("/me") Actor me(HttpServletRequest req) { return Access.actor(req); }
     @PostMapping("/logout") Object logout(HttpServletRequest req) {
+        var actor=Access.actor(req);
+        store.audit(actor.username(),"LOGOUT",actor.id());
         req.getSession().invalidate();
         return Map.of("ok",true);
-    }
-    @GetMapping("/users") Object users() { return store.rows("select id,username,role from accounts order by id"); }
-    @GetMapping("/audit") Object audit(HttpServletRequest req) {
-        Access.actor(req).admin();
-        return store.rows("select * from audit order by id desc");
     }
     @PostMapping("/users") @Transactional
     public Object user(@RequestBody Account input,HttpServletRequest req) {

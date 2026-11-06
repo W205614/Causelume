@@ -38,11 +38,14 @@ class OperationsTest {
         long id=json.readTree(created.body()).get("id").asLong();
         var race=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/tickets/"+id+"/actions"))
             .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(
-                json.writeValueAsString(Map.of("action","NOTE","version",0,"note","new observation")))).build();
+                json.writeValueAsString(Map.of("action","ASSIGN","assigneeId",2,"version",0,"note","on call")))).build();
         var a=http.sendAsync(race,HttpResponse.BodyHandlers.ofString());
         var b=http.sendAsync(race,HttpResponse.BodyHandlers.ofString());
         assertEquals(java.util.Set.of(200,409),java.util.Set.of(a.join().statusCode(),b.join().statusCode()));
-        assertEquals(2,json.readTree(request("tickets/"+id,null).body()).get("timeline").size());
+        var updated=json.readTree(request("tickets/"+id,null).body());
+        assertEquals("ASSIGNED",updated.get("status").asString());
+        assertEquals(1,updated.get("version").asLong());
+        assertEquals(2,updated.get("timeline").size());
     }
 
     @Test void loginPermissionsAndTickets() throws Exception {

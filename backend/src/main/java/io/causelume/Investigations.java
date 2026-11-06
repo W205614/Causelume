@@ -55,6 +55,10 @@ class Investigations {
             throw new Problem(409,"调查需要已分派或处理中的工单");
         if (!store.rows("select id from tasks where ticket_id=? and status in ('PENDING','RUNNING')",input.ticketId).isEmpty())
             throw new Problem(409,"此工单已有调查在进行");
+        // Admissions on different tickets compete for the same finite worker queue.
+        store.one("select id from task_admission where id=1 for update");
+        if (store.db.queryForObject("select count(*) from tasks where status in ('PENDING','RUNNING')",Long.class) >= 32)
+            throw new Problem(429,"待处理调查已达上限，请稍后再试");
         long id = store.insert("insert into tasks(ticket_id,creator_id,request_id,status) values (?,?,?,'PENDING')",
                 input.ticketId,actor.id(),input.requestId);
         store.audit(actor.username(),"CREATE_TASK",id);
@@ -63,7 +67,7 @@ class Investigations {
     @PostMapping("/{id}/feedback") @Transactional
     public Object feedback(@PathVariable long id,@RequestBody Feedback input,HttpServletRequest req) {
         var actor = Access.actor(req);
-        var task = store.one("select t.status,k.assignee_id from tasks t join tickets k on k.id=t.ticket_id where t.id=?",id);
+        var task = store.one("select t.status,k.assignee_id from tasks t join tickets k on k.id=t.ticket_id where t.id=? for update",id);
         if (!actor.role().equals("ADMIN") && !Long.valueOf(actor.id()).equals(task.get("assigneeId")))
             throw new Problem(403,"需要工单负责人或管理员权限");
         if (!List.of("FAILED","SUCCEEDED").contains(task.get("status"))) throw new Problem(409,"请等待任务结束");

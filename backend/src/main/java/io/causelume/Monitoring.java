@@ -16,7 +16,6 @@ class Monitoring {
     record Service(String name,String description,String resource) {}
     record Alert(long serviceId,String source,String externalId,String severity,String title,Instant occurredAt) {}
 
-    @GetMapping("/services") Object services() { return store.rows("select * from services order by id"); }
     @PostMapping("/services") @Transactional
     public Object service(@RequestBody Service input,HttpServletRequest req) {
         var actor=Access.actor(req);

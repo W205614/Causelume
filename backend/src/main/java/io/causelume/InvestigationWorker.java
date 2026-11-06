@@ -82,17 +82,19 @@ class InvestigationWorker {
         if (!taskId.equals(result.path("taskId").asString("")) || !List.of("offline","holmes").contains(result.path("mode").asString("")))
             throw new Problem(502,"调查服务返回的任务标识或模式无效");
         for (String key : List.of("possibleCause","uncertainty","recommendation")) {
-            if (!validText(result.get(key))) throw new Problem(502,"调查服务返回的分析字段无效");
+            if (!validText(result.get(key),2000)) throw new Problem(502,"调查分析字段为空或超过 2000 字符");
         }
         var evidence = result.path("evidence");
-        if (!evidence.isArray() || evidence.isEmpty()) throw new Problem(502,"调查服务没有返回证据");
+        if (!evidence.isArray() || evidence.isEmpty() || evidence.size()>10) throw new Problem(502,"调查需包含 1–10 条证据");
         for (var row : evidence) {
-            if (!validText(row.get("source")) || !validText(row.get("detail"))) throw new Problem(502,"证据缺少来源或内容");
+            if (!validText(row.get("source"),100) || !validText(row.get("detail"),2048)) throw new Problem(502,"证据来源或详情为空或超长");
         }
         return result;
     }
 
-    private boolean validText(JsonNode value) {
-        return value != null && value.isString() && !value.asString().isBlank();
+    private boolean validText(JsonNode value,int max) {
+        if (value == null || !value.isString()) return false;
+        String text=value.asString();
+        return !text.isBlank() && text.codePointCount(0,text.length())<=max;
     }
 }
