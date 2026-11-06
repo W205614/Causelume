@@ -16,3 +16,4 @@ production.env
 *.jsonl
 
 heartbeat.env
+/deployment/observability/compose.site.yaml

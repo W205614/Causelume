@@ -13,3 +13,33 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: '{{ $labels.service }} 在五分钟窗口出现多次 HTTP 5xx'
+      - alert: InvestigationQueueDelayed
+        expr: causelume_investigation_queue_oldest_seconds{job="causelume"} > 120
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $labels.service }} 最早的待执行调查已等待超过两分钟'
+      - alert: InvestigationRecentlyFailed
+        expr: causelume_investigations_failed_recent{job="causelume"} > 0
+        for: 30s
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $labels.service }} 最近十五分钟出现调查失败'
+      - alert: MailDeliveryNeedsAttention
+        expr: sum by (service, environment) (causelume_mail_delivery_attention{job="causelume"}) > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $labels.service }} 有邮件投递失败或确认状态未知，请人工核查'
+      - alert: DatabaseConnectionPoolBusy
+        expr: hikaricp_connections_pending{job="causelume"} > 0 or (hikaricp_connections_active{job="causelume"} / hikaricp_connections_max{job="causelume"}) >= 0.9
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $labels.service }} 数据库连接池持续出现等待或占用达到九成'
+      - alert: ApplicationFilesystemLowSpace
+        expr: disk_free_bytes{job="causelume"} / disk_total_bytes{job="causelume"} < 0.1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $labels.service }} 应用工作目录所在文件系统可用空间不足一成'

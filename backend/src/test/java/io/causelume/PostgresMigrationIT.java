@@ -28,6 +28,10 @@ class PostgresMigrationIT {
         legacy.execute("alter table tickets alter column id restart with 27");
         Path dump=tmp.resolve("backup.jsonl");
         OfflineStorage.run(new String[]{"storage","export-h2",base.toString(),dump.toString()});
+        if (dump.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            assertEquals("rw-------",java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(dump)));
+        }
+        assertThrows(FileAlreadyExistsException.class,()->OfflineStorage.run(new String[]{"storage","export-h2",base.toString(),dump.toString()}));
         var corrupt=tmp.resolve("bad.jsonl");
         Files.writeString(corrupt,Files.readString(dump).replace("旧记录","已篡改"));
         assertThrows(IllegalArgumentException.class,()->OfflineStorage.run(new String[]{"storage","import-pg",corrupt.toString()}));

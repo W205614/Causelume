@@ -20,7 +20,7 @@ Java 绑定服务的数据源、`service` 和 `environment` 标签，并创建�
 
 - Prometheus 在窗口结束时评估固定 PromQL，以同一窗口内的 `up` 最小值及 Spring/Micrometer `http_server_requests_seconds_{count,sum}` 计数器增量计算请求量、5xx 增量和平均响应时间。计数器增量采用 Prometheus 外推语义，可能是小数。聚合平均不能解释尾延迟。未产生过 5xx 标签时该信号显示缺失。[Prometheus 查询接口](https://prometheus.io/docs/prometheus/latest/querying/api/)
 - Loki 使用相同的标签和毫秒分辨率窗口 `(start,end]`，按时间倒序请求 4 条、最多保留 3 条，额外一条用于判定截断。仅允许受控事件枚举、日志级别、HTTP 状态、毫秒耗时和时间戳进入冻结结果；其他 JSON 字段、自由文本、流标签和未知事件内容一律移除。用户可以看到 `unclassified`。原始日志仍受源端 Loki 权限和保留设置约束。[Loki 查询接口](https://grafana.com/docs/loki/latest/reference/loki-http-api/)
-- `observations.metrics`、`observations.logs` 各自保存实际查询、窗口、来源、采集时刻、状态、截断标志、样本和完整性。Prometheus 另列 `missingSignals`。空窗口、源端异常、截断、未结束窗口、指标缺失会限制结论。查询均在本次任务中冻结；在途日志仍可能稍后进入同一历史窗口。两套存储没有跨库事务快照。
+- `observations.metrics`、`observations.logs` 各自保存实际查询、窗口、来源、采集时刻、状态、截断标志、样本和完整性。Prometheus 另列 `missingSignals`。空窗口、源端异常、截断、未结束窗口、指标缺失会限制结论。查询均在本次任务中冻结；在途日志仍可能稍后进入同一历史窗口。两套存储没有跨库事务快照。调查开始前固定一次采样时间。`requestedRange` 保存申请区间，`effectiveRange` 保存截至采样时间的实际区间。含未来时段时返回 `partial` 和限制说明；整个区间尚未开始时有效区间为 `null`，不查询数据源。
 - 所有来源都没有样本时保留观测记录，不请求模型。已授权的 Holmes 任务此时显示 `modelExecution=skipped_no_evidence` 并报告实际模型用量 0。单个来源失败时保存另一来源的数据和 `partial`。
 
 ## 模型与费用

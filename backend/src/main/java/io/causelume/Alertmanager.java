@@ -44,7 +44,15 @@ class Alertmanager {
         String state=Problem.choice(event.path("status").asString(""),java.util.Set.of("firing","resolved"),"status");
         var labels=event.path("labels");
         String name=Problem.text(labels.path("service").asString(""),100,"labels.service");
-        var service=store.one("select id,owner_id,active from services where name=? for update",name);
+        String environment=labels.has("environment")
+            ? Problem.text(labels.path("environment").asString(""),64,"labels.environment") : null;
+        String query="select id,owner_id,active from services where coalesce(service_label,name)=?";
+        var matches=environment==null
+            ? store.rows(query+" order by id limit 2 for update",name)
+            : store.rows(query+" and environment=? order by id limit 2 for update",name,environment);
+        if(matches.isEmpty()) throw new Problem(404,"没有服务匹配告警的 service/environment 标签");
+        if(matches.size()>1) throw new Problem(409,"告警标签匹配多个服务，请提供 environment 并确保服务标签与环境组合唯一");
+        var service=matches.getFirst();
         long serviceId=(long)service.get("id");
         String fingerprint=Problem.text(event.path("fingerprint").asString(""),100,"fingerprint");
         java.time.OffsetDateTime start=timestamp(event,"startsAt");

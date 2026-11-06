@@ -55,6 +55,8 @@ services:
       SPRING_MAIL_PORT: ${SMTP_PORT:-587}
       SPRING_MAIL_USERNAME: ${SMTP_USERNAME:?required}
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: "true"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_REQUIRED: "true"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_CHECKSERVERIDENTITY: "true"
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_CONNECTIONTIMEOUT: "5000"
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_TIMEOUT: "5000"
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_WRITETIMEOUT: "5000"
@@ -151,6 +153,15 @@ services:
       - backup-work:/work
       - ./secrets:/config/secrets:ro
       - ./production.env:/config/production.env:ro
+      - ./deployment:/config/deployment:ro
+      - ./compose.production.yaml:/config/compose.production.yaml:ro
+      - ./compose.observability.yaml:/config/compose.observability.yaml:ro
+      - ./agent/holmes-observations.yaml:/config/agent/holmes-observations.yaml:ro
+      - type: bind
+        source: ./heartbeat.env
+        target: /config/heartbeat.env
+        read_only: true
+        bind: {create_host_path: false}
     networks: [database, edge]
 
   restore-postgres:

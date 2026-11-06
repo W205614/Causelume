@@ -1,8 +1,10 @@
 package io.causelume;
 
 import java.io.*;
+import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.sql.*;
 import java.time.*;
@@ -95,7 +97,7 @@ class OfflineStorage {
             if(!row.next() || (version=Integer.parseInt(row.getString(1)))<5) throw new IllegalStateException("需先升级至 H2 V5");
         }
         var tables=describe(db,"PUBLIC");
-        try(var out=Files.newBufferedWriter(file,StandardCharsets.UTF_8,StandardOpenOption.CREATE_NEW)) {
+        try(var out=newExportWriter(file)) {
             line(out,Map.of("format","causelume-jsonl-1","version",version));
             var pending=new LinkedHashMap<>(tables);
             var done=new HashSet<String>();
@@ -119,6 +121,13 @@ class OfflineStorage {
             line(out,Map.of("complete",true));
         }
         db.commit();
+    }
+    private static BufferedWriter newExportWriter(Path file) throws IOException {
+        if (!file.getFileSystem().supportedFileAttributeViews().contains("posix"))
+            return Files.newBufferedWriter(file,StandardCharsets.UTF_8,StandardOpenOption.CREATE_NEW);
+        var ownerOnly=PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"));
+        var channel=Files.newByteChannel(file,Set.of(StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE),ownerOnly);
+        return new BufferedWriter(Channels.newWriter(channel,StandardCharsets.UTF_8));
     }
     private static void line(BufferedWriter out,Object value) throws IOException {
         out.write(JSON.writeValueAsString(value));

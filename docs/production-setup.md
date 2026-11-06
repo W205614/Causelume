@@ -6,8 +6,8 @@
 
 1. 安装维护中的 Linux、Docker Engine 和 Compose v2，启用主机时间同步。工作目录设为 /opt/causelume。
 2. 防火墙只向外开放 SSH（限制来源）及 80/443。PostgreSQL、Agent、Holmes、Prometheus、Loki、Alertmanager 与管理指标端口通过内部网络访问。
-3. 拉取审核过的提交，复制 production.env.example 为 production.env。运行 python scripts/init_production.py，设置文件仅所属用户可读；Linux 上核对目录 0700、文件 0600。不要把目录交给公开静态站点。
-4. 从发布工作流的 release-manifest 填写 APP_IMAGE、AGENT_IMAGE 和 APP_RELEASE。镜像摘要必须对应已通过检查的候选提交。
+3. 拉取审核过的提交，复制 production.env.example 为 production.env。以专用部署用户运行 `python scripts/init_production.py`。Linux 上 `secrets/` 权限为 0700，其他宿主用户无法遍历。内部凭据文件权限为 0444，Compose 按服务授权单独只读挂载，使容器中不同 UID 能读取所需文件。备份服务另有整个目录的归档权限。将该目录置于部署用户控制、未公开共享的路径下。
+4. 从发布工作流的 release-manifest 填写 APP_IMAGE、AGENT_IMAGE 和 APP_RELEASE。GHCR 包如果设为私有，服务器需先通过 `docker login ghcr.io` 使用具有 read:packages 权限的凭据登录；用标准输入传入令牌，勿写入命令历史。若需要匿名拉取，由包所有者在 GitHub 的包设置中公开该包。镜像摘要必须对应已通过检查的候选提交。
 5. 编辑外部凭据及域名，先运行 Compose config --quiet，再使用 sh scripts/release.sh。部署依赖的角色、数据库和内部网络由配置创建。
 
 ~~~sh
@@ -27,7 +27,7 @@ APP_DOMAIN 填域名，不带 https://；非标准端口需显式设置相应入
 
 ## SMTP 与通知
 
-production.env 配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_FROM，secrets/SMTP_PASSWORD 填服务商授权凭据。默认启用 STARTTLS，connect/read/write 各5秒超时。收件邮箱在账户安全页维护。
+production.env 配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_FROM，secrets/SMTP_PASSWORD 填服务商授权凭据。填写外部凭据时可临时 `chmod u+w secrets/SMTP_PASSWORD`，写入后重新运行 `python scripts/init_production.py` 还原权限；脚本保留现有值。其他外部凭据采用相同步骤。默认使用587端口并要求 STARTTLS、校验证书主机名，connect/read/write 各5秒超时。服务商使用465隐式TLS时，在主机 compose.site.yaml 的 app.environment 中配置 SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE="true"、STARTTLS_ENABLE="false"、STARTTLS_REQUIRED="false"（三个完整属性均保留 MAIL_SMTP 前缀），SSL_CHECKSERVERIDENTITY 保持开启；按服务商文档选择协议。收件邮箱在账户安全页维护。
 
 投递过程有站内记录。临时拒绝按10秒、1分钟、5分钟最多重试三次；明确永久拒绝终止，发送结果不明不自动重发。管理员在通知中心的「邮件投递管理」查看失败与未知记录。人工重发可能产生重复，需填写依据。
 
@@ -35,7 +35,7 @@ production.env 配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_FROM，secret
 
 ## 真实应用与观测
 
-部署配置位于 deployment/observability。为应用增加 Prometheus/Micrometer 入口和日志采集路径，统一 service/environment 标签。Prom 抓取配置、Alloy 文件路径及标签可以用配置接入。注册数据源仅由服务端维护，服务目录只选择批准的 sourceId。
+部署配置位于 deployment/observability。为应用增加 Prometheus/Micrometer 入口和日志采集路径，统一 service/environment 标签。Prom 抓取配置、Alloy 文件路径及标签可以用配置接入。注册数据源仅由服务端维护，服务目录只选择批准的 sourceId。不同 Compose 项目接入时使用 [专用网络和只读日志卷示例](../deployment/observability/README.md)，主机配置保存为 deployment/observability/compose.site.yaml，发布脚本会自动加载并随备份保存。
 
 生产 Agent 通过查询网关访问数据源；该网络没有 Loki 写入端点直连。网关仅允许固定GET查询与健康路径，实际查询仍受标签、时段、记录数和响应上限约束。数据库及模型密钥不进入浏览器。
 
@@ -55,13 +55,13 @@ Java在事务中预留额度，明确授权的任务才可进入模型请求。�
 
 ~~~sh
 docker compose --env-file production.env -f compose.production.yaml --profile maintenance build backup
-docker compose --env-file production.env -f compose.production.yaml --profile maintenance run --rm --entrypoint restic backup init
+docker compose --env-file production.env -f compose.production.yaml --profile maintenance run --rm backup init
 docker compose --env-file production.env -f compose.production.yaml --profile maintenance run --rm backup
 ~~~
 
-备份包含一致 pg_dump、摘要、发布提交和配置/秘密文件，加密后上传。配置内容敏感，即便是加密归档也需限制访问。工作卷使用固定暂存文件；restic历史快照不自动prune。保留/清理先预览并按所有者确认的策略执行。
+备份包含一致 pg_dump、摘要和版本记录。定时备份记录配置的 APP_RELEASE。升级前备份从当前或已停的旧 app 容器读取镜像摘要，记录为 `pre-upgrade:<旧镜像摘要>`；使用标签启动的旧容器记录实际镜像 ID。旧 app 容器已移除时标记 `pre-upgrade:unknown`。每个快照的 `/config` 包含备份当时的 production.env、两份生产 Compose 文件、heartbeat.env、secrets/、deployment/（包括主机定制的采集目标、日志标签和数据源）及 agent/holmes-observations.yaml。灾难恢复时将这些文件按原路径放回发布目录，再运行密钥初始化脚本校正权限并保留恢复值。配置内容敏感，即便是加密归档也需限制访问。工作卷使用固定暂存文件；restic历史快照不自动prune。保留/清理先预览并按所有者确认的策略执行。
 
-安装 deployment/systemd 中 backup.service、backup.timer，启用后每12小时触发。BACKUP_HEARTBEAT_URL 指向独立的备份检查，只有备份与仓库校验成功后才发送心跳。
+安装 deployment/systemd 中 causelume-backup.service、causelume-backup.timer，启用后每12小时触发。BACKUP_HEARTBEAT_URL 指向独立的备份检查，只有备份与仓库校验成功后才发送心跳。
 
 ## 隔离恢复和回退
 
@@ -79,10 +79,21 @@ docker compose --env-file production.env -f compose.production.yaml --profile re
 
 ## 机外探测
 
-复制 deployment/systemd/heartbeat.env.example 为 /opt/causelume/heartbeat.env，填真实 PUBLIC_HEALTH_URL、EXTERNAL_HEARTBEAT_URL，权限0600。安装 heartbeat.service/timer，按服务商要求设置周期和宽限。探测脚本先检查公网TLS/数据库健康，再发送心跳。
+初始化脚本从 deployment/systemd/heartbeat.env.example 创建 /opt/causelume/heartbeat.env，保留已有值。填真实 PUBLIC_HEALTH_URL、EXTERNAL_HEARTBEAT_URL，权限0600。DISK_CHECK_PATH 指向实际 Docker 数据目录（用 docker info --format 检查 DockerRootDir），MIN_FREE_DISK_KIB 默认为5 GiB。安装 causelume-heartbeat.service/timer，按服务商要求设置周期和宽限。探测脚本先检查主机该分区空间、公网TLS/数据库健康，再发送心跳；任何检查失败都不发送成功心跳。应用容器的磁盘指标只代表该容器工作目录所在文件系统，不能替代主机分区检查。备份年龄由独立备份心跳的周期和宽限监控，需在机外服务设定不超过24小时的告警窗口。
 
 分别停止平台和备份心跳，确认机外服务发送通知。探测服务必须位于该云主机之外；同机告警无法覆盖整机停电或网络中断。
 
+外部资源配置完成且首次手工备份/恢复通过后，安装并启用定时任务：
+
+~~~sh
+sudo install -m 644 deployment/systemd/causelume-*.service deployment/systemd/causelume-*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now causelume-backup.timer causelume-restore.timer causelume-heartbeat.timer
+systemctl list-timers 'causelume-*'
+~~~
+
+用 `journalctl -u causelume-backup.service`、`journalctl -u causelume-restore.service` 检查结果；机外服务另行验证漏心跳通知。没有配置外部资源时不要启用这些生产任务。
+
 ## 发布与升级
 
-每次升级先看 release-manifest、安全扫描与数据迁移结果。release.sh 会检查配置和磁盘、拉取固定镜像，已运行实例先备份，再启动迁移及健康校验。维护中安排停止业务写入，检查未知调查与通知。发布后核对历史数据和MFA，记录实际使用提交和镜像摘要。定期扫描依赖与镜像，补丁更新重跑直接影响的恢复与业务验收。
+每次升级先看 release-manifest、安全扫描与数据迁移结果。切换代码和 production.env 前，保留与旧版本对应的配置快照。release.sh 按 Compose 解析出的 PostgreSQL 数据卷名称判断是否首装。无卷且无运行中的数据库时直接拉取；有卷、数据库正在使用该卷时，即便 app 已停也先执行加密备份，成功后才拉取并更新。若数据库已停或挂载不匹配，脚本在拉取和迁移前中止。用旧版本兼容的 PostgreSQL 恢复数据库服务，核对挂载和数据后再执行升级。维护中安排停止业务写入，检查未知调查与通知。发布后核对历史数据和MFA，记录实际使用提交和镜像摘要。定期扫描依赖与镜像，补丁更新重跑直接影响的恢复与业务验收。

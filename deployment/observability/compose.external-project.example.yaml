@@ -1,0 +1,15 @@
+# Optional third file after compose.production.yaml and compose.observability.yaml.
+services:
+  prometheus:
+    networks: [telemetry, project-metrics]
+  alloy:
+    volumes:
+      - project-logs:/var/log/observed-project:ro
+networks:
+  project-metrics:
+    external: true
+    name: ${OBSERVED_METRICS_NETWORK:?Set the existing metrics network name}
+volumes:
+  project-logs:
+    external: true
+    name: ${OBSERVED_LOG_VOLUME:?Set the existing application log volume name}

@@ -54,3 +54,18 @@ GET /api/tasks/{id} 返回单条调查完整分析、观察证据及反馈。GET
 旧数组入口 /api/tickets、/api/alerts、/api/tasks 最多返回最近 100 项。任务数组返回摘要；取证据的调用方应改用详情接口，浏览全部历史请用分页接口。
 
 会话、可信 Origin、登录审计、上游限额、队列容量和目录游标见 [安全与并发约束](SECURITY.md)。
+
+## 平台运行指标
+
+独立管理端口的 `GET /actuator/prometheus` 使用 `Authorization: Bearer <MANAGEMENT_TOKEN>`。每次抓取执行六个只读聚合查询。业务指标仅使用固定状态标签。
+
+| Prometheus 指标 | 含义 |
+|---|---|
+| `causelume_investigations{state="PENDING"}`、`{state="RUNNING"}` | 当前待执行和执行中的调查数量 |
+| `causelume_investigation_queue_oldest_seconds` | 队列中最早创建的调查已等待的秒数，队列空时为 0 |
+| `causelume_investigations_failed_recent` | 最近 15 分钟内结束且状态为 FAILED 的调查数 |
+| `causelume_mail_delivery_attention{state="FAILED"}`、`{state="UNKNOWN"}` | 已确认投递失败和投递结果未知的通知数，可在通知的投递异常列表核对 |
+
+Prometheus 装载 `deployment/observability/service-alerts.yml`，监控抓取中断、HTTP 5xx、调查排队、近期调查失败、异常邮件、数据库连接池压力，以及应用工作目录所在文件系统的剩余空间。要让平台自身告警自动建单，请先登记与抓取标签一致的服务名 `causelume` 并配置负责人。
+
+宿主机其他挂载点、PostgreSQL 数据卷和备份仓库的容量需要分别采集。备份脚本在归档与仓库校验完成后请求 `BACKUP_HEARTBEAT_URL`；按 12 小时备份周期在独立服务配置心跳过期通知，便可覆盖主机停机和漏跑。未配置机外心跳时，只能从备份记录核查最近成功时间。

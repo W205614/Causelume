@@ -1,12 +1,19 @@
 #!/bin/sh
 set -eu
 umask 077
-export PGPASSWORD="$(cat /run/secrets/APP_MIGRATOR_PASSWORD)"
 export RESTIC_PASSWORD_FILE=/run/secrets/RESTIC_PASSWORD
 if [ -s /run/secrets/AWS_ACCESS_KEY_ID ]; then
   export AWS_ACCESS_KEY_ID="$(cat /run/secrets/AWS_ACCESS_KEY_ID)"
   export AWS_SECRET_ACCESS_KEY="$(cat /run/secrets/AWS_SECRET_ACCESS_KEY)"
 fi
+if [ "$#" -eq 1 ] && [ "$1" = init ]; then
+  exec restic init
+fi
+if [ "$#" -ne 0 ]; then
+  printf '%s\n' 'usage: backup [init]' >&2
+  exit 2
+fi
+export PGPASSWORD="$(cat /run/secrets/APP_MIGRATOR_PASSWORD)"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 file="/work/causelume.dump"
 pg_dump -h postgres -U causelume_migrator -d causelume -Fc --no-owner --no-acl > "$file"

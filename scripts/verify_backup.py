@@ -31,9 +31,11 @@ def main():
             (path/"password").write_text(secrets.token_urlsafe(32),encoding="utf-8")
             dump=run("docker","exec",name,"pg_dump","-U","postgres","-Fc","postgres",capture_output=True).stdout
             (path/"database.dump").write_bytes(dump)
+            # Linux restores must be readable and removable by the owner of this temporary directory.
+            owner = ["--user", f"{os.getuid()}:{os.getgid()}"] if os.name == "posix" else []
             def restic(*args):
-                return run("docker","run","--rm","--network","none","--entrypoint","restic",
-                    "-v",str(path.resolve())+":/test",RESTIC,"-r","/test/repository","--password-file","/test/password",*args,
+                return run("docker","run","--rm","--network","none",*owner,"--entrypoint","restic",
+                    "-v",str(path.resolve())+":/test",RESTIC,"--no-cache","-r","/test/repository","--password-file","/test/password",*args,
                     capture_output=True)
             restic("init")
             restic("backup","/test/database.dump","--tag","synthetic-restore")
