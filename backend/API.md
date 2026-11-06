@@ -2,7 +2,7 @@
 
 Web 页面和 /api 同源。POST 使用 application/json，登录成功后由容器写入 HttpOnly、SameSite=Strict 的会话 Cookie，空闲 30 分钟失效。管理员可派工、创建用户和服务、查看审计。运维可查看派工名单、接入告警、建单、留言及处理自己负责的工单。
 
-接口直接返回 JSON 对象或数组。业务错误返回 `{"message":"..."}`。400 表示字段无效，401 需登录，403 权限不足，404 记录不存在，409 表示重复或状态竞争需要刷新，415 表示媒体类型不符。
+接口直接返回 JSON 对象或数组。业务错误返回 `{"message":"..."}`。400 表示字段无效，401 需登录，403 权限不足，404 记录不存在，409 表示重复或状态竞争需要刷新，413 表示请求体过大，415 表示媒体类型不符，429 表示登录或调查容量已达上限。
 
 | 方法和路径 | 输入与结果 |
 |---|---|
@@ -52,3 +52,5 @@ GET /api/tickets/page、/api/alerts/page、/api/tasks/page 共用从 1 开始的
 GET /api/tasks/{id} 返回单条调查完整分析、观察证据及反馈。GET /api/overview 从全库统计 openTickets、criticalAlerts、activeTasks、services、alertCounts、taskCounts，并附最近 5 条工单和告警。activeTasks 包含 PENDING 与 RUNNING。
 
 旧数组入口 /api/tickets、/api/alerts、/api/tasks 最多返回最近 100 项。任务数组返回摘要；取证据的调用方应改用详情接口，浏览全部历史请用分页接口。
+
+会话、可信 Origin、登录审计、上游限额、队列容量和目录游标见 [安全与并发约束](SECURITY.md)。
