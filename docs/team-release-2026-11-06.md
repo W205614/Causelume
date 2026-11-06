@@ -35,4 +35,22 @@ CI后重新运行：Java17项、PG专项2项、前端16项、Agent16项、发布
 
 ## 文件与数据保留
 
-现有H2历史数据需要先冷备、核验副本及增量迁移，再更新日常容器。业务卷与当前有效恢复集保留。旧Holmes工具文件只能在确认新容器已不挂载后移入回收站；演示入口、截图、锁文件、数据库历史迁移、协议测试及有唯一证据的历史文档继续保留。Docker清理只针对本项目、已核验归属且无用途的资源，不执行全局prune。
+旧Holmes挂载已经解除，随后将agent/holmes.yaml、agent/holmes_read.py、agent/holmes-snapshot.yaml移入回收站。当前Compose、官方镜像黑盒及调查接口均使用holmes-observations.yaml；旧实现由Git历史及升级前恢复集保留。早期审查文档记录的是当时事实，继续作为历史记录保留，不能据其旧挂载说明恢复旧配置。
+
+另外移入回收站的目录：两份早期pre-v3备份、一份本次ACL失败后留下的空备份目录、验证成功后的演练克隆，以及agent/__pycache__、scripts/__pycache__、frontend/test-results三个生成目录。当前升级前/后两份有效恢复集保留。回收站没有清空，移入回收站不代表已释放磁盘空间。
+
+演示入口、四张新截图、锁文件、数据库历史迁移、协议测试及有唯一证据的历史文档继续保留。Docker清理只针对本项目，不执行全局prune。10个旧版或测试镜像逐个核实所有运行及停止容器均无引用、没有其他项目标签后移除；当前app/agent/checkout镜像及其revision标签、固定Holmes镜像保留。更新时替换4个旧容器和3个旧网络，最终保留4个新版停止容器及其3个网络，未发现需删除的额外项目卷，causelume_business业务卷保留。未操作其他项目容器、镜像、数据卷、网络及共享构建缓存。
+
+## 日常部署与数据核验
+
+实际日常部署仍为本机回环HTTP、H2与checkout示例，与隔离验证的Linux/PostgreSQL生产候选区分。本次没有配置云主机、域名或真实SMTP，也没有将本地升级当成公网验收。
+
+1. 停止本项目Java服务后，冷备业务卷、旧server.jar及恢复所需配置到当前用户目录Causelume-backups。目录仅当前Windows用户及SYSTEM可访问，配置及导出不进入Git。Windows初始化脚本改用SID设置ACL，避免非ASCII账户名解码后授权失败；本机实际初始化及重复执行保留原值的检查通过。
+2. 在断网的独立数据副本上运行新镜像，由Flyway V5升级至V9，核对全部既有字段及行。正式升级后再次核对：accounts 2、audit 20、services 1、alerts 2、task_admission 1、tickets 2、tasks 2、timeline 12全部一致，原调查JSON和密码哈希未改写。升级前没有PENDING/RUNNING调查。
+3. 保留20261106-192032-pre-team-3195fbf与20261106-193341-post-team-3195fbf两个私有恢复集。分别复核清单8/6个文件的SHA256；升级后冷备数据库文件与停止状态下业务卷的SHA256相同。升级前恢复集另保留核对导出，升级后恢复集保留新JAR及当前配置；这些文件可能含凭据和业务信息，不对外分享。
+4. 日常app/agent/checkout使用本机构建的3195fbf镜像，Holmes继续使用固定0.46.0摘要。四服务实际启动并达到healthy。app的77项应用类和资源与当前本地构建逐字节相同，包含当前前端文件；agent四个源码文件和Holmes配置也与工作区相同。实际JAR包含Spring Boot 4.1.2、Tomcat 11.0.27及Jackson 3.1.7。
+5. 原.env未改写，另用不入库的compose.override.yaml将app和agent固定为offline。本次日常部署核验未新增调查、未使用现存模型密钥。验证后执行项目stop，app、agent、checkout、holmes均已停止。后续可用docker compose --profile holmes up -d启动；该命令自动合并本机override，改回真实模型模式前需显式调整覆盖配置、预算与授权。
+
+1a71303的[七项CI](https://github.com/W205614/Causelume/actions/runs/42209190263)已通过。后续收尾提交仅包含Windows配置工具修正、旧挂载文件移除及文档，不改变已核验的业务镜像内容；以该提交对应Verify工作流确认最终仓库状态。
+
+本机操作的哈希清单、迁移核对、镜像归属及清理结果存于Codex本次任务的team-maintenance私有审计目录。外部接入和仍需实测的事项见上方“交付边界”及production-setup.md。

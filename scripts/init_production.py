@@ -51,7 +51,12 @@ def main():
             target.chmod(0o444)
     else:
         import subprocess
-        identity=subprocess.check_output(["whoami"],text=True).strip()
+        import re
+        account=subprocess.check_output(["whoami","/user","/fo","csv","/nh"])
+        match=re.search(rb"S-1-\d+(?:-\d+)+",account)
+        if not match:
+            raise RuntimeError("Could not determine the current Windows user SID")
+        identity="*"+match.group().decode("ascii")
         subprocess.run(["icacls",str(args.directory.resolve()),"/inheritance:r","/grant:r",
                         identity+":(OI)(CI)F","*S-1-5-18:(OI)(CI)F"],check=True,stdout=subprocess.DEVNULL)
         subprocess.run(["icacls",str(heartbeat.resolve()),"/inheritance:r","/grant:r",

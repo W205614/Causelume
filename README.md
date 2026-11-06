@@ -53,6 +53,8 @@ docker compose up -d --build --wait
 
 已有部署跳过 `init_env.py`，它通过拒绝覆盖保护现有配置。不要直接用新容器对原业务卷试跑迁移；先完成备份与副本升级验证。更新镜像需要重新创建容器，`docker restart` 不会切换到新镜像。已有数据的检查顺序见 [运维边界](docs/operations.md)。
 
+本机专用覆盖配置可放在不入库的 `compose.override.yaml`。不指定 `-f` 时 Compose 会自动合并它；显式指定配置文件时，需要同时列出该覆盖文件。检查实际 `AGENT_MODE` 后再发起调查，避免沿用已有 `.env` 中的真实模型模式。本机维护后的具体模式和容器状态见 [小团队交付记录](docs/team-release-2026-11-06.md)。
+
 本轮还提供 Linux 单机生产候选，使用 PostgreSQL 18、强制 TOTP、邮件与站内通知、Prometheus/Alertmanager/Loki/Alloy、人工预算调查、Caddy HTTPS 和加密备份。外部资源尚未配置时，候选代码仍可在隔离环境完成验收。实测及尚未运行项见 [个人版验收](docs/personal-release.md)。
 
 ## 后续接入云主机、域名和外部服务
