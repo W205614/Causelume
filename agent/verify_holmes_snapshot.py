@@ -9,7 +9,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import yaml
@@ -17,6 +17,7 @@ import yaml
 
 def verify():
     model_requests = []
+    reject_provider = False
 
     class Model(BaseHTTPRequestHandler):
         def do_POST(self):
@@ -24,6 +25,14 @@ def verify():
             assert body["max_output_tokens"] == 1200
             assert self.path == "/v1/responses" and body["model"] == "gpt-6.1-sol"
             model_requests.append(body)
+            if reject_provider:
+                data = b'{"error":{"message":"Synthetic provider unavailable","type":"server_error"}}'
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if any(item.get("type") == "function_call_output" for item in body["input"]):
                 output = [{"type": "message", "role": "assistant", "id": "msg_1", "status": "completed",
                            "content": [{"type": "output_text", "text": "contract complete", "annotations": []}]}]
@@ -52,6 +61,7 @@ def verify():
                "ENABLE_CONVERSATION_HISTORY_COMPACTION":"false", "LITELLM_LOCAL_MODEL_COST_MAP": "True", "PYTHON_DOTENV_DISABLED": "1",
                "LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES": "true", "HOLMES_API_KEY": "contract-only",
                "OPENAI_API_KEY": "contract-only", "OPENAI_BASE_URL": config["api_base"]}
+        env.update(LLM_REQUEST_TIMEOUT="60", LLM_RATE_LIMIT_MAX_WAIT_SECONDS="0")
         process = subprocess.Popen([sys.executable, "-u", "server.py"], cwd="/app", env=env)
         try:
             base = "http://127.0.0.1:5050"
@@ -99,6 +109,16 @@ def verify():
                 "frozen_metrics": "error", "frozen_logs": "error"}
             assert not marker.exists()
             print("Verified actual Holmes tool outputs, Responses loopback, and rejected injected header.", flush=True)
+            before = len(model_requests)
+            reject_provider = True
+            try:
+                chat(*(base64.urlsafe_b64encode(view.encode()).decode().rstrip("=") for view in views))
+            except HTTPError as error:
+                assert error.code == 500, error.code
+            else:
+                raise AssertionError("Provider rejection was reported as a successful investigation")
+            assert len(model_requests) == before + 1, "Provider failure was retried"
+            print("Verified provider 503 fails after one request without an implicit retry.", flush=True)
         finally:
             process.terminate()
             process.wait(timeout=20)
