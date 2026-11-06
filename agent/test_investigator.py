@@ -1,5 +1,6 @@
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
 import unittest
@@ -83,7 +84,7 @@ class InvestigationTests(unittest.TestCase):
 
     def test_model_http_contract_and_failures(self):
         holmes = Flask("holmes-contract-double")
-        enabled = [{"name": "causelume_checkout", "enabled": True, "status": "enabled", "tool_count": 2}]
+        enabled = [{"name": "causelume_snapshot", "enabled": True, "status": "enabled", "tool_count": 2}]
         analysis = {key: f"test {key}" for key in investigator.FIELDS}
         model_status = 200
         chats = []
@@ -97,7 +98,7 @@ class InvestigationTests(unittest.TestCase):
         @holmes.post("/api/chat")
         def chat():
             chats.append(request.json)
-            return {"analysis": json.dumps(analysis)}, model_status
+            return {"analysis": json.dumps(analysis), "tool_calls": []}, model_status
 
         with http_service(holmes) as url, patch.dict(os.environ, {
                 "HOLMES_URL": url, "AGENT_MODE": "holmes", "HOLMES_API_KEY": "test-holmes"}):
@@ -113,9 +114,82 @@ class InvestigationTests(unittest.TestCase):
             model_status = 200
             analysis.clear()
             self.assertEqual(self.run_task().status_code, 502)
+            analysis.update({key: "x" * 2001 for key in investigator.FIELDS})
+            self.assertEqual(self.run_task().status_code, 502)
             enabled.append({"name": "bash", "enabled": True})
             self.assertEqual(self.run_task().status_code, 502)
-            self.assertEqual(len(chats), 3)
+            self.assertEqual(len(chats), 4)
+
+    def test_two_inflight_samples_keep_their_own_evidence_after_recovery(self):
+        holmes = Flask("concurrent-model-double")
+        sampled = threading.Event()
+        recovered = threading.Event()
+        fault_view = []
+        substitute_other_view = False
+
+        @holmes.get("/api/info")
+        def info():
+            return {"auth_enabled": True, "toolsets": [
+                {"name": "causelume_snapshot", "enabled": True, "status": "enabled", "tool_count": 2}]}
+
+        @holmes.post("/api/chat")
+        def chat():
+            metrics = bytes.fromhex(request.headers["X-Causelume-Metrics"]).decode()
+            logs = bytes.fromhex(request.headers["X-Causelume-Logs"]).decode()
+            if json.loads(metrics)["errors"]:
+                fault_view.append(logs)
+                sampled.set()
+                assert recovered.wait(4)
+            if substitute_other_view:
+                logs = fault_view[0]
+            calls = [{"tool_call_id": "call-42", "tool_name": "checkout_logs",
+                      "result": {"status": "success", "data": logs}}]
+            return {"analysis": json.dumps(dict.fromkeys(investigator.FIELDS, "contract")), "tool_calls": calls}
+
+        with http_service(holmes) as url, patch.dict(os.environ, {
+                "HOLMES_URL": url, "AGENT_MODE": "holmes", "HOLMES_API_KEY": "test-holmes"}):
+            app = investigator.create_app()
+
+            def inspect(task_id):
+                return app.test_client().post("/investigate", headers=auth("test-agent"),
+                                              json={"taskId": task_id, "service": "checkout"})
+
+            self.toggle(True)
+            failed_request = self.demo.get("/checkout").json["id"]
+            with ThreadPoolExecutor(max_workers=1) as workers:
+                first = workers.submit(inspect, "before-recovery")
+                try:
+                    self.assertTrue(sampled.wait(4))
+                    self.toggle(False)
+                    self.demo.get("/checkout")
+                    second = inspect("after-recovery")
+                finally:
+                    recovered.set()
+                first = first.result()
+            self.assertEqual((first.status_code, second.status_code), (200, 200))
+            self.assertNotEqual(first.json["snapshotId"], second.json["snapshotId"])
+            self.assertIn(failed_request, first.json["evidence"][-1]["detail"])
+            for result in (first.json, second.json):
+                tool = result["evidence"][-1]
+                view = json.loads(tool["detail"].split(" ", 1)[1])
+                self.assertEqual(tool["source"], "holmes:checkout_logs")
+                self.assertEqual((view["snapshotId"], view["sampledAt"]), (result["snapshotId"], result["sampledAt"]))
+            self.assertNotIn(failed_request, str(second.json["evidence"]))
+            substitute_other_view = True
+            self.assertEqual(inspect("cross-task-leak").status_code, 502)
+
+    def test_oversized_observation_body(self):
+        oversized = Flask("oversized-observation")
+
+        @oversized.get("/snapshot")
+        def snapshot():
+            return {"service": "checkout", "extra": "x" * 4096}
+
+        with http_service(oversized) as url, patch.dict(os.environ, {"DEMO_URL": url}):
+            self.agent = investigator.create_app().test_client()
+            response = self.run_task()
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("大小", response.json["error"])
 
     def test_upstream_timeout(self):
         delayed = Flask("delayed-upstream")

@@ -47,6 +47,12 @@ jobs:
           python-version: "3.13"
       - run: python -m pip install -r agent/requirements.txt
       - run: python -m unittest discover -s agent -p 'test*.py'
+      - name: Verify Holmes tools without provider access
+        run: |
+          docker run --rm --network none --entrypoint python \
+            -v "$PWD/agent/verify_holmes_snapshot.py:/contract/verify.py:ro" \
+            -v "$PWD/agent/holmes-snapshot.yaml:/contract/holmes-snapshot.yaml:ro" \
+            robustadev/holmes:0.46.0@sha256:bec9d14eea6a8890ba498c91ab47adcce3af9b6d0c6ee26d642d4e3e0df6218e /contract/verify.py
   deployment:
     runs-on: ubuntu-latest
     steps:

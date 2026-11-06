@@ -71,10 +71,8 @@ services:
       HOLMES_CONFIGPATH_DIR: /etc/causelume
       HOLMES_API_KEY: ${HOLMES_API_KEY:?required}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      EVIDENCE_TOKEN: ${EVIDENCE_TOKEN:?required}
     volumes:
-      - ./agent/holmes.yaml:/etc/causelume/config.yaml:ro
-      - ./agent/holmes_read.py:/etc/causelume/holmes_read.py:ro
+      - ./agent/holmes-snapshot.yaml:/etc/causelume/config.yaml:ro
     networks: [evidence, model]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5050/healthz',timeout=2)"]

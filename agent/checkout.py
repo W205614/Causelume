@@ -64,6 +64,15 @@ def create_app():
         with lock:
             return {"service": "checkout", "entries": list(entries)}
 
+    @app.get("/snapshot")
+    def snapshot():
+        authenticate(reader)
+        with lock:
+            errors = [row for row in entries if row["status"] >= 500]
+            return {"service": "checkout", "snapshotId": uuid4().hex, "sampledAt": timestamp(),
+                    "requests": len(entries), "errors": len(errors),
+                    "latestError": errors[-1] if errors else None}
+
     return app
 
 
