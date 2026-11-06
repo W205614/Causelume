@@ -13,6 +13,7 @@ const paths = {
   alerts: "M12 3 2 21h20z M12 9v5 M12 17h.01",
   tickets: "M5 3h14v18H5z M8 8h8 M8 12h8 M8 16h4",
   tasks: "M4 12h5l3-8 3 16 3-8h3",
+  account: "M12 3 3 7v6c0 5 9 8 9 8s9-3 9-8V7z M9 12l2 2 4-4",
   users:
     "M5 20v-2a5 5 0 0 1 10 0v2 M14 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0z M17 4a4 4 0 0 1 0 8 M18 15a4 4 0 0 1 3 4",
 };
@@ -31,6 +32,7 @@ export const pages = {
   tickets: "事件与工单",
   tasks: "Agent 调查",
   users: "用户管理",
+  account: "账户安全",
 };
 const labels = {
   OPEN: "待分派",

@@ -1,3 +1,4 @@
+import { accountPage, accountAction, clearAccountSecrets } from "./account.js";
 import { demo, request } from "./api.js";
 import {
   esc,
@@ -39,7 +40,7 @@ function login() {
     (demo
       ? '<p class="muted">演示账号 admin 或 operator，密码 demo。</p>'
       : "") +
-    '<label>账号<input name="username" autocomplete="username" required autofocus></label><label>密码<input type="password" name="password" autocomplete="current-password" required></label><p class="error" role="alert"></p><button class="primary">登录</button></form></section></div>';
+    '<label>账号<input name="username" autocomplete="username" required autofocus></label><label>密码<input type="password" name="password" autocomplete="current-password" required></label><label>验证码或恢复码<input name="code" autocomplete="one-time-code" placeholder="已启用二次验证时填写"></label><p class="error" role="alert"></p><button class="primary">登录</button></form></section></div>';
   root.querySelector("form").onsubmit = async (e) => {
     e.preventDefault();
     const f = e.currentTarget,
@@ -61,6 +62,7 @@ function shell(page) {
     brand +
     '<nav aria-label="主导航">' +
     Object.entries(pages)
+      .filter(([key]) => !me.enrollmentRequired || key === "account")
       .map(
         ([key, title]) =>
           '<a href="#' +
@@ -87,6 +89,7 @@ function shell(page) {
 }
 async function loadView(page, id, params) {
   const state = { admin: me.role === "ADMIN", actorId: me.id, params };
+  if (page === "account") return { ...state, me };
   const list = async (name) =>
     request("/" + name + "/page?" + params.toString());
   switch (page) {
@@ -210,7 +213,7 @@ async function render() {
   }
   const [path, query = ""] = location.hash.slice(1).split("?"),
     [raw, id] = path.split("/"),
-    page = raw || "overview",
+    page = me.enrollmentRequired ? "account" : raw || "overview",
     params = new URLSearchParams(query);
   shell(page);
   const main = root.querySelector("main");
@@ -221,6 +224,7 @@ async function render() {
     ticket = data.ticket;
     task = data.task;
     const views = {
+      account: () => accountPage(me),
       overview,
       services: servicesPage,
       alerts: alertsPage,
@@ -376,6 +380,10 @@ root.onclick = async (e) => {
   const btn = e.target.closest("[data-op]");
   if (!btn) return;
   const [op, arg] = btn.dataset.op.split(":");
+  if (await accountAction(op, { form, input, request, render, me, refreshMe: async (logout = false) => {
+    me = logout ? null : await request("/me");
+    if (logout) { clearAccountSecrets(); await render(); }
+  } })) return;
   if (op === "refresh") {
     await render();
     return;

@@ -21,7 +21,7 @@ export async function request(path, body) {
   if (!response.ok)
     throw Object.assign(
       Error(json?.message || "请求失败（HTTP " + response.status + "）"),
-      { status: response.status },
+      { status: response.status, code: json?.code },
     );
   if (json === null) throw Error("服务返回了无法识别的数据。");
   const cursor = response.headers.get("X-Next-Cursor");
