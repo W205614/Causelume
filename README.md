@@ -4,7 +4,7 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 [![Verify](https://github.com/W205614/Causelume/actions/workflows/verify.yml/badge.svg)](https://github.com/W205614/Causelume/actions/workflows/verify.yml)
 
-[文档导航](docs/README.md) · [Linux 部署](docs/production-setup.md) · [发布镜像](https://github.com/W205614/Causelume/actions/workflows/release.yml) · [运维手册](docs/operations.md)
+[快速开始](#快速开始) · [运行示例](#完成一条故障流程) · [文档导航](docs/README.md) · [Linux 部署](docs/production-setup.md) · [发布镜像](https://github.com/W205614/Causelume/actions/workflows/release.yml)
 
 - **体验界面**　打开部署后的 `/?demo=1`。页面标记「模拟数据」，可以试派工和调查；刷新会重置样例。
 - **验证完整流程**　使用默认的离线模式。示例 checkout 会真正返回 503、生成日志与指标，Python 使用规则分析，全程无需模型密钥。
@@ -42,24 +42,74 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 ## 快速开始
 
-本地使用 Docker Desktop、H2 和 checkout 示例服务。首次运行时生成 `.env` 并启动：
+### 准备环境
+
+本地体验需要 Git、Python 3.13 和已启动的 [Docker Desktop](https://docs.docker.com/compose/install/)（使用 Linux 容器）。Linux 也可使用 Docker Engine 与 Compose 插件。Java、Maven、Node.js 和数据库由容器提供。
+
+在终端检查：
 
 ~~~sh
+git --version
+python --version
+docker version
+docker compose version
+~~~
+
+首次构建需要联网下载镜像及 Maven/PyPI 依赖。默认采用离线调查模式，无需模型密钥、域名或 SMTP。
+
+### 克隆并启动
+
+~~~sh
+git clone https://github.com/W205614/Causelume.git
+cd Causelume
 python scripts/init_env.py
 docker compose up -d --build --wait
 ~~~
 
-打开 [控制台](http://127.0.0.1:18760)，使用 `.env` 中的 admin 或 operator 初始密码登录。业务数据保存在 Docker 命名卷中。
+执行 `docker compose ps`，确认 `app`、`agent`、`checkout` 三个服务均为 `healthy`。打开 [健康检查](http://127.0.0.1:18760/api/health)，应看到 `{"status":"UP"}`。
+
+### 登录和体验
+
+用文本编辑器打开项目根目录的 `.env`，查找对应的初始密码：
+
+| 入口 | 账号 | 密码 |
+|---|---|---|
+| [业务控制台](http://127.0.0.1:18760) | `admin` / `operator` | `.env` 中的 `APP_ADMIN_PASSWORD` / `APP_OPERATOR_PASSWORD` |
+| [界面演示](http://127.0.0.1:18760/?demo=1) | `admin` / `operator` | `demo` |
+
+业务控制台读写数据库；界面演示使用浏览器内的样例数据。先用 `admin` 登录业务控制台，可在概览查看服务和工单，在「服务与资源」查看内置的 checkout 服务。
+
+停止服务使用 `docker compose stop`；下次使用 `docker compose up -d --wait`。业务数据保存在 Docker 命名卷中，停止后保留。
+
+<details>
+<summary>已有部署与本机配置</summary>
 
 已有 `.env` 时跳过初始化，沿用现有账户和数据。升级前备份数据库并在副本上验证迁移，更新镜像后重新创建容器。操作步骤见 [数据迁移](backend/STORAGE.md) 和 [运维手册](docs/operations.md)。
 
 本机配置可放在不入库的 `compose.override.yaml`。Compose 默认自动合并它；使用 `-f` 时同时列出所需的覆盖文件。`AGENT_MODE=offline` 使用离线规则，`holmes` 使用真实模型。
 
-Linux 单机部署使用 PostgreSQL 18、TOTP、邮件与站内通知、Prometheus/Alertmanager/Loki/Alloy、Caddy HTTPS 和加密备份。按下节配置外部服务后，可接入实际项目。
+</details>
+
+## 完成一条故障流程
+
+本地首次体验时，在项目根目录执行：
+
+~~~sh
+python scripts/e2e.py --env-file .env --expect-mode offline
+~~~
+
+脚本会在当前本地实例创建一条验收工单，自动完成：
+
+1. 让 checkout 实际返回 503，记录日志与指标。
+2. 录入告警、创建工单，分派给 operator 并开始处理。
+3. 发起离线调查，保存证据、分析和人工反馈。
+4. 解除故障并实测 HTTP 200，记录恢复依据，填写复盘并关闭工单。
+
+终端出现 `Passed: ... offline investigation; HTTP 503 -> 200` 即表示流程通过。回到控制台，在「故障工单」查看生成的工单与时间线，在「Agent 调查」查看该次结果和证据。
 
 ## 部署与外部服务接入
 
-Linux 部署需要准备主机、域名和相应服务账户，按下表填写配置。凭据存放在受限文件中。
+本地体验之后，可按需部署到 Linux 单机，使用 PostgreSQL 18、TOTP、邮件通知、Prometheus/Alertmanager/Loki/Alloy、Caddy HTTPS 和加密备份。准备主机、域名及服务账户后，按下表填写配置。凭据存放在受限文件中。
 
 | 资源 | 填写位置 | 接入与验收 |
 |---|---|---|
@@ -126,7 +176,9 @@ flowchart LR
 
 每次调查冻结服务范围和时间窗口，并展示来源缺失、样本截断及模型执行状态。平台预算控制调查准入，实际费用以供应商账单核对。备份策略、恢复目标和扩容条件见 [运维手册](docs/operations.md)。
 
-## 开发与复验
+## 源码开发与测试
+
+源码开发使用 Java 21、Maven、Node.js 22 和 Python 3.13。下面的命令用于开发与完整验收；仅通过 Docker 体验项目时，执行上面的快速开始和运行示例即可。
 
 ~~~sh
 python -m pip install -r agent/requirements.txt
@@ -151,7 +203,9 @@ python scripts/verify_candidate.py
 
 ## 常见问题
 
+- **找不到 `python` 命令？** Windows 可使用 `py -3.13`，macOS/Linux 可使用已安装的 `python3`，替换文档中的 `python`。
 - **已有 `.env`，初始化报 FileExistsError？** 跳过初始化，保留原配置；脚本不会覆盖已有凭据。
+- **端口被占用？** 在 `.env` 修改 `APP_PORT` 或 `CHECKOUT_PORT` 后重新运行启动命令。相应调整访问地址；验收脚本可用 `--app`、`--checkout` 指定新地址。
 - **本地运行需要云主机、域名或 SMTP 吗？** 不需要，按快速开始使用 Docker Desktop 即可。配置 SMTP 后可将站内通知同时投递到邮箱。
 - **如何切换模型模式？** 默认使用 `AGENT_MODE=offline`。设置模型密钥、预算、`AGENT_MODE=holmes` 和 `COMPOSE_PROFILES=holmes` 后，重新创建容器；本机覆盖文件中的模式设置也需同步调整。
 - **如何反馈问题？** 提供提交号或镜像摘要、复现步骤和脱敏日志。配置排查见 [安全说明](backend/SECURITY.md) 和 [运维手册](docs/operations.md)。
