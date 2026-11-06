@@ -28,6 +28,16 @@ jobs:
           java-version: 21
           cache: maven
       - run: mvn -B -f backend/pom.xml verify
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python -m pip install -r agent/requirements.txt
+      - run: npm ci && npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: python scripts/verify_local.py
   investigator:
     runs-on: ubuntu-latest
     steps:

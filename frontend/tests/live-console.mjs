@@ -65,7 +65,7 @@ try {
     for (const source of [
       "checkout:/metrics",
       "checkout:/logs",
-      "已人工核对日志与指标",
+      "验收脚本已核对日志与指标",
     ]) {
       await expect(page.getByText(source, { exact: true })).toBeVisible();
     }

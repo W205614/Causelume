@@ -3,8 +3,11 @@ api_base: https://api.openai.com/v1
 max_steps: 4
 toolsets:
   bash: {enabled: false}
+  confluence: {enabled: false}
+  connectivity_check: {enabled: false}
   core_investigation: {enabled: false}
   internet: {enabled: false}
+  kubernetes/logs: {enabled: false}
   skills: {enabled: false}
   causelume_checkout:
     enabled: true
@@ -14,9 +17,7 @@ toolsets:
     tools:
       - name: checkout_metrics
         description: Read request and HTTP 5xx counts for the current window.
-        command: >-
-          curl -fsS --max-time 3 -H "Authorization: Bearer ${EVIDENCE_TOKEN}" http://checkout:8092/metrics
+        command: python /etc/causelume/holmes_read.py metrics
       - name: checkout_logs
         description: Read timestamped request IDs, status codes and pool events for the same window.
-        command: >-
-          curl -fsS --max-time 3 -H "Authorization: Bearer ${EVIDENCE_TOKEN}" http://checkout:8092/logs
+        command: python /etc/causelume/holmes_read.py logs
