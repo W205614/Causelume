@@ -576,3 +576,20 @@ dialog .actions {
     margin-bottom: 14px;
   }
 }
+.write-notice {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: #e5f3ed;
+  color: #164c40;
+}
+body > .write-notice {
+  position: fixed;
+  z-index: 2;
+  bottom: 8px;
+  right: 16px;
+  max-width: min(90vw, 420px);
+}
+.write-notice button {
+  margin-left: 6px;
+}

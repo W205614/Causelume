@@ -167,7 +167,7 @@ export function overview({ tickets, services, alerts, tasks }) {
     panel(
       "调查任务",
       '<div class="pad stack">' +
-        ["RUNNING", "SUCCEEDED", "FAILED"]
+        ["PENDING", "RUNNING", "SUCCEEDED", "FAILED"]
           .map(
             (s) =>
               "<div>" +

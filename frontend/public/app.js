@@ -207,7 +207,22 @@ const select = (key, name, options, chosen) =>
     )
     .join("") +
   "</select></label>";
-function form(title, fields, send) {
+function reportLate(message) {
+  const host = dialog.open ? dialog : document.body;
+  const notice = document.createElement("div");
+  notice.className = "write-notice";
+  notice.setAttribute("role", "status");
+  notice.textContent = message + " ";
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.textContent = "知道了";
+  dismiss.onclick = () => notice.remove();
+  notice.append(dismiss);
+  host.append(notice);
+}
+function form(title, fields, send, review) {
+  const pageEpoch = epoch,
+    owner = me;
   dialog.innerHTML =
     "<form><h2>" +
     title +
@@ -220,17 +235,52 @@ function form(title, fields, send) {
     e.preventDefault();
     const f = e.currentTarget,
       btn = f.querySelector(".primary");
+    const current = () =>
+      pageEpoch === epoch && dialog.open && dialog.contains(f);
     btn.disabled = true;
     try {
       const next = await send(Object.fromEntries(new FormData(f)));
+      if (!current()) {
+        if (owner === me)
+          reportLate(
+            title +
+              "已提交" +
+              (typeof next === "string" ? "（" + next + "）" : "") +
+              "。可刷新原页面核对。",
+          );
+        return;
+      }
       dialog.close();
       if (typeof next === "string" && location.hash !== "#" + next)
         location.hash = next;
       else await render();
     } catch (err) {
+      if (!current()) {
+        if (owner === me)
+          reportLate(
+            title +
+              (err.status ? "未提交：" : "提交结果未确认，请刷新核对：") +
+              err.message,
+          );
+        return;
+      }
       f.querySelector(".error").textContent = err.message;
+      if (err.status === 409 && review) {
+        try {
+          const message = await review();
+          if (current()) {
+            f.querySelector(".error").textContent = message;
+            btn.textContent = "重新确认";
+          }
+        } catch (readError) {
+          if (current())
+            f.querySelector(".error").textContent =
+              "读取最新工单失败，请关闭后刷新核对。" + readError.message;
+          btn.dataset.blocked = "1";
+        }
+      }
     } finally {
-      btn.disabled = false;
+      btn.disabled = btn.dataset.blocked === "1";
     }
   };
 }
@@ -260,7 +310,10 @@ root.onclick = async (e) => {
       chosen,
     );
   if (op === "newTicket" || op === "fromAlert") {
-    const a = data.alerts.find((a) => String(a.id) === arg),
+    const a =
+        op === "fromAlert"
+          ? data.alerts.find((a) => String(a.id) === arg)
+          : null,
       requestId = crypto.randomUUID();
     form(
       "创建工单",
@@ -283,6 +336,7 @@ root.onclick = async (e) => {
     );
   }
   if (op === "action") {
+    let reviewed = ticket;
     const fields =
       arg === "ASSIGN"
         ? select(
@@ -299,12 +353,28 @@ root.onclick = async (e) => {
           { VERIFY: "恢复验证依据", CLOSE: "复盘记录" }[arg] || "处理说明",
         ),
       async (f) => {
-        await request("/tickets/" + ticket.id + "/actions", {
+        await request("/tickets/" + reviewed.id + "/actions", {
           ...f,
           ...(f.assigneeId ? { assigneeId: Number(f.assigneeId) } : {}),
-          version: ticket.version,
+          version: reviewed.version,
           action: arg,
         });
+      },
+      async () => {
+        reviewed = await request("/tickets/" + reviewed.id);
+        const latest = reviewed.timeline.at(-1);
+        const owner =
+          data.users?.find((u) => u.id === reviewed.assigneeId)?.username ||
+          "待分派";
+        return (
+          "工单已更新，请复核后重新确认。当前" +
+          label(reviewed.status) +
+          "，负责人 " +
+          owner +
+          "，版本 " +
+          reviewed.version +
+          (latest ? "。最新记录：" + latest.actor + " · " + latest.note : "")
+        );
       },
     );
   }
@@ -356,9 +426,12 @@ root.onclick = async (e) => {
     const requestId = crypto.randomUUID();
     form(
       "发起只读调查",
-      "<p>调查结果将关联工单 #" + ticket.id + "，供人工核查。</p>" +
-        (demo ? "<p>本次使用模拟数据。</p>" :
-          "<p>若服务端启用 HolmesGPT，确认后将调用模型，可能产生 API 费用。离线模式使用规则分析。</p>"),
+      "<p>调查结果将关联工单 #" +
+        ticket.id +
+        "，供人工核查。</p>" +
+        (demo
+          ? "<p>本次使用模拟数据。</p>"
+          : "<p>若服务端启用 HolmesGPT，确认后将调用模型，可能产生 API 费用。离线模式使用规则分析。</p>"),
       async () => {
         const t = await request("/tasks", { ticketId: ticket.id, requestId });
         return "tasks/" + t.id;
