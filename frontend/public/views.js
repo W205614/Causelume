@@ -13,6 +13,8 @@ const paths = {
   alerts: "M12 3 2 21h20z M12 9v5 M12 17h.01",
   tickets: "M5 3h14v18H5z M8 8h8 M8 12h8 M8 16h4",
   tasks: "M4 12h5l3-8 3 16 3-8h3",
+  notifications: "M5 17h14l-2-3V8a5 5 0 0 0-10 0v6z M10 20h4",
+  budget: "M3 5h18v15H3z M3 9h18 M15 13h3",
   account: "M12 3 3 7v6c0 5 9 8 9 8s9-3 9-8V7z M9 12l2 2 4-4",
   users:
     "M5 20v-2a5 5 0 0 1 10 0v2 M14 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0z M17 4a4 4 0 0 1 0 8 M18 15a4 4 0 0 1 3 4",
@@ -33,6 +35,8 @@ export const pages = {
   tasks: "Agent 调查",
   users: "用户管理",
   account: "账户安全",
+  notifications: "通知中心",
+  budget: "模型预算",
 };
 const labels = {
   OPEN: "待分派",
@@ -368,10 +372,12 @@ export function servicesPage({ services, admin }) {
               '</p><p class="muted">' +
               esc(s.resource) +
               "</p>" +
-              (s.name === "checkout"
-                ? navLink("services/" + s.id, "查看日志与指标")
-                : "") +
-              "</article>",
+              (s.sourceId && s.sourceId !== "checkout-demo"
+                ? navLink("tasks?serviceId=" + s.id, "查看观测调查")
+                : s.name === "checkout" ? navLink("services/" + s.id, "查看日志与指标") : "") +
+              (admin ? '<p>' + button("serviceEdit:" + s.id, "编辑") + button("sourceCheck:" + s.id, "连接检测") +
+              (s.maintenanceUntil ? button("maintenanceEnd:" + s.id, "结束静默") : button("maintenance:" + s.id, "维护静默")) + '</p>' : "") +
+              '<p>' + esc(s.environment || "default") + " · " + (s.active === false ? "已停用" : "启用") + '</p></article>',
           )
           .join("") +
         "</div>"
@@ -431,12 +437,12 @@ export function alertsPage(data) {
 }
 export const usersPage = ({ users, admin, audit }) =>
   admin
-    ? header(pages.users, button("newUser", "＋ 添加用户", true)) +
+    ? header(pages.users, button("newUser", "＋ 添加用户", true) + button("retention", "历史保留预览")) +
       panel(
         "成员名单",
         table(
-          ["编号", "账号", "角色"],
-          users.map((u) => [u.id, esc(u.username), esc(label(u.role))]),
+          ["编号", "账号", "角色", "状态", "管理"],
+          users.map((u) => [u.id, esc(u.username), esc(label(u.role)), u.active === false ? "停用" : "启用", button("userStatus:" + u.id, u.active === false ? "启用" : "停用") + button("userPassword:" + u.id, "重置密码")]),
         ),
       ) +
       (audit
@@ -528,6 +534,8 @@ export function taskDetail(t, { tickets, admin, actorId }) {
     evidence = panel(
       "现场证据",
       (snapshot ? '<div class="snapshot">' + snapshot + "</div>" : "") +
+      (r.windowStart ? '<div class="snapshot">查询范围 ' + time(r.windowStart) + ' — ' + time(r.windowEnd) + '</div>' : "") +
+      (r.completeness && r.completeness !== "complete" ? '<p class="retry">证据完整性 ' + esc(r.completeness) + '。请核对缺失的数据源与截断记录。</p>' : "") +
         '<ol class="evidence">' +
         (samples || "<li>未取得证据</li>") +
         "</ol>",
@@ -570,6 +578,9 @@ export function taskDetail(t, { tickets, admin, actorId }) {
     summary +
     (events ? '<div class="stage-times">' + events + "</div>" : "") +
     error +
+    (r?.usage ? '<div class="snapshot">模型 ' + esc(r.usage.model || "未调用") + ' · 模板 ' + esc(r.usage.promptVersion || "未知") +
+      ' · 输入 token ' + esc(r.usage.inputTokens ?? "未知") + ' · 输出 token ' + esc(r.usage.outputTokens ?? "未知") +
+      ' · 费用 $' + esc(r.usage.costUsd ?? "待供应商核对") + '</div>' : "") +
     pending +
     (r ? '<div class="investigation">' + evidence + analysis + "</div>" : "") +
     panel(
@@ -581,7 +592,7 @@ export function taskDetail(t, { tickets, admin, actorId }) {
 }
 export function detail(
   t,
-  { users, services, tasks, admin, actorId, relatedTotal },
+  { users, services, tasks, admin, actorId, relatedTotal, params },
 ) {
   const next = {
     OPEN: "ASSIGN",
@@ -595,6 +606,11 @@ export function detail(
   if (admin && t.status === "ASSIGNED")
     actions += button("action:ASSIGN", "改派");
   if (next) actions += button("action:NOTE", "添加记录");
+  if (admin || actorId === t.assigneeId) {
+    actions += button("priority", "优先级") + button("improvement", "改进事项");
+    if (t.status === "CLOSED") actions += button("reopen", "重新打开");
+  }
+  actions += '<a href="/api/tickets/' + t.id + '/export?format=markdown" download>导出复盘</a>';
   const related = tasks.filter((task) => task.ticketId === t.id);
   if (
     ["ASSIGNED", "PROCESSING"].includes(t.status) &&
@@ -638,9 +654,15 @@ export function detail(
     navLink("tickets", "返回工单列表") +
     header("#" + t.id + "　" + t.title, actions) +
     '<div class="ticket-layout">' +
-    panel("处理时间线", '<div class="pad">' + timeline + "</div>") +
+    panel("处理时间线", '<div class="pad">' + timeline +
+      (t.timelineTotal > 50 ? '<p><a href="#tickets/' + t.id + '?timelinePage=' +
+        (Math.min(Math.ceil(t.timelineTotal / 50), Number(params?.get("timelinePage") || 1) + 1)) + '">更早处理记录</a> · <a href="#tickets/' + t.id + '">最新记录</a></p>' : "") + "</div>") +
     '<div class="ticket-aside">' +
-    panel("工单信息", about) +
+    panel("工单信息", about + '<div class="pad">优先级 ' + esc(t.priority || "P3") + ' · 恢复验证 ' + esc(t.verification || "尚未记录") + '</div>') +
+    (t.impact ? panel("结构化复盘", '<div class="pad"><p>影响范围 ' + esc(t.impact) + '</p><p>发生 ' + time(t.incidentStartedAt) +
+      ' · 恢复 ' + time(t.incidentEndedAt) + '</p><h3>原因</h3><p>' + esc(t.cause) + '</p><h3>不确定性</h3><p>' + esc(t.uncertainty) + '</p></div>') : "") +
+    panel("改进事项", '<div class="pad">' + (t.improvements || []).map(item => '<p>' + esc(item.title) + ' · ' + esc(item.status) + ' · 负责人 #' + esc(item.ownerId) + ' · 截止 ' + esc(item.dueDate) +
+      (item.status !== "DONE" && (admin || actorId === t.assigneeId) ? button("improvementDone:" + item.id, "标记完成") : "") + '</p>').join("") + '</div>') +
     panel(
       "关联调查",
       '<div class="pad stack">' +

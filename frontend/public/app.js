@@ -1,3 +1,4 @@
+import { productAction, notificationsPage, budgetPage } from "./product.js";
 import { accountPage, accountAction, clearAccountSecrets } from "./account.js";
 import { demo, request } from "./api.js";
 import {
@@ -62,7 +63,7 @@ function shell(page) {
     brand +
     '<nav aria-label="主导航">' +
     Object.entries(pages)
-      .filter(([key]) => !me.enrollmentRequired || key === "account")
+      .filter(([key]) => (key !== "budget" || me.role === "ADMIN") && (!me.enrollmentRequired || key === "account"))
       .map(
         ([key, title]) =>
           '<a href="#' +
@@ -90,6 +91,8 @@ function shell(page) {
 async function loadView(page, id, params) {
   const state = { admin: me.role === "ADMIN", actorId: me.id, params };
   if (page === "account") return { ...state, me };
+  if (page === "notifications") return { ...state, notifications: await request("/notifications" + (params.size ? "?" + params : "")) };
+  if (page === "budget") return { ...state, budget: await request("/budget") };
   const list = async (name) =>
     request("/" + name + "/page?" + params.toString());
   switch (page) {
@@ -125,6 +128,10 @@ async function loadView(page, id, params) {
         request("/tickets/" + encodeURIComponent(id)),
         request("/tasks/page?ticketId=" + encodeURIComponent(id) + "&size=20"),
       ]);
+      if (params.has("timelinePage")) {
+        const history = await request("/tickets/" + encodeURIComponent(id) + "/timeline?page=" + encodeURIComponent(params.get("timelinePage")) + "&size=50");
+        ticket.timeline = [...history.items].reverse();
+      }
       return {
         ...state,
         services,
@@ -224,6 +231,8 @@ async function render() {
     ticket = data.ticket;
     task = data.task;
     const views = {
+      notifications: notificationsPage,
+      budget: budgetPage,
       account: () => accountPage(me),
       overview,
       services: servicesPage,
@@ -284,7 +293,7 @@ const select = (key, name, options, chosen) =>
   "<label>" +
   name +
   '<select required name="' +
-  key +
+  key + '" aria-label="' + esc(name) +
   '">' +
   options
     .map(
@@ -384,6 +393,16 @@ root.onclick = async (e) => {
     me = logout ? null : await request("/me");
     if (logout) { clearAccountSecrets(); await render(); }
   } })) return;
+  const actionEpoch = epoch;
+  try {
+    if (await productAction(op, arg, { form, input, request, data, ticket, me, render,
+      isCurrent: () => epoch === actionEpoch,
+      refreshMe: async () => { me = await request("/me"); }
+    })) return;
+  } catch (err) {
+    if (epoch === actionEpoch) reportLate(err.message);
+    return;
+  }
   if (op === "refresh") {
     await render();
     return;
@@ -392,6 +411,7 @@ root.onclick = async (e) => {
     try {
       await request("/logout", {});
       me = null;
+      clearAccountSecrets();
       await render();
     } catch (err) {
       form("退出失败", "<p>" + esc(err.message) + "</p>", async () => {});
@@ -452,16 +472,24 @@ root.onclick = async (e) => {
             data.users.map((u) => [u.id, u.username]),
           )
         : "";
+    const verification = arg === "VERIFY" && !demo ? select("verification", "恢复检测结果", [
+      ["UNKNOWN", "未知，仍需核查"], ["PASSED", "通过，已有恢复依据"], ["FAILED", "失败，继续处理"]
+    ]) : "";
+    const reviewFields = arg === "CLOSE" && !demo ? area("impact", "影响范围") +
+      input("startedAt", "故障开始时间", "datetime-local") + input("endedAt", "恢复时间", "datetime-local") +
+      area("cause", "原因或尚未确定的原因") + area("uncertainty", "不确定性与证据缺口") : "";
     form(
       label(arg),
-      fields +
+      fields + verification + reviewFields +
         area(
           "note",
           { VERIFY: "恢复验证依据", CLOSE: "复盘记录" }[arg] || "处理说明",
         ),
       async (f) => {
+        const { impact, startedAt, endedAt, cause, uncertainty, ...values } = f;
         await request("/tickets/" + reviewed.id + "/actions", {
-          ...f,
+          ...values,
+          ...(impact ? { postmortem: { impact, startedAt: new Date(startedAt).toISOString(), endedAt: new Date(endedAt).toISOString(), cause, uncertainty } } : {}),
           ...(f.assigneeId ? { assigneeId: Number(f.assigneeId) } : {}),
           version: reviewed.version,
           action: arg,
@@ -546,7 +574,9 @@ root.onclick = async (e) => {
     );
   }
   if (op === "feedback")
-    form("填写人工反馈", area("feedback", "核查结果"), async (f) => {
+    form("填写人工反馈", area("feedback", "核查结果") + select("rating", "帮助程度", [
+      ["HELPFUL", "有帮助"], ["PARTIAL", "部分正确"], ["UNHELPFUL", "无帮助"]
+    ]), async (f) => {
       await request("/tasks/" + task.id + "/feedback", f);
     });
 };

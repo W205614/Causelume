@@ -146,6 +146,11 @@ const passwords = new Map([
 let me;
 export const demo = true;
 export async function request(path, body) {
+  if (path === "/notifications") return { items: [], nextCursor: null };
+  if (path === "/budget") return { mode: "模拟数据", dailyBudgetUsd: "", reservationUsd: "", reservations: [] };
+  if (path === "/sources") return { sources: [{ id: "checkout-demo", name: "模拟 checkout" }] };
+  if (path === "/account/profile") { me.email = body.email; return { ok: true }; }
+
   await new Promise((resolve) => setTimeout(resolve, 50));
   if (path === "/login") {
     if (passwords.get(body.username) !== body.password)

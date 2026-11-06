@@ -1,3 +1,4 @@
+import { demo } from "./api.js";
 import { esc } from "./views.js";
 
 let enrollment, recoveryCodes;
@@ -6,6 +7,7 @@ export function clearAccountSecrets() {
   recoveryCodes = undefined;
 }
 export function accountPage(me) {
+  if (demo) return '<h1>账户安全</h1><p class="empty">当前为内存模拟工作区。验证器绑定和密码管理在真实业务工作区提供。</p>';
   return '<div class="head"><h1>账户安全</h1></div>' +
     (me.enrollmentRequired ? '<p class="retry">请先完成二次验证绑定，再使用工作区。</p>' : "") +
     '<section class="panel"><div class="pad"><h2>登录保护</h2><p>当前账号 ' + esc(me.username) +

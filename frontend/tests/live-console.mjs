@@ -38,6 +38,14 @@ try {
     await page
       .getByLabel(field, { exact: true })
       .fill(action + " · 浏览器验收记录");
+    if (action === "验证恢复") await page.getByLabel("恢复检测结果", { exact: true }).selectOption("PASSED");
+    if (action === "关闭并复盘") {
+      await page.getByLabel("影响范围", { exact: true }).fill("隔离验收服务");
+      await page.getByLabel("故障开始时间", { exact: true }).fill("2026-11-06T10:00");
+      await page.getByLabel("恢复时间", { exact: true }).fill("2026-11-06T10:05");
+      await page.getByLabel("原因或尚未确定的原因", { exact: true }).fill("验收模拟故障");
+      await page.getByLabel("不确定性与证据缺口", { exact: true }).fill("仅验证测试数据");
+    }
     await page.getByRole("button", { name: "确认", exact: true }).click();
   }
   await expect(page.getByText("已关闭", { exact: true })).toBeVisible();

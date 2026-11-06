@@ -48,7 +48,8 @@ class Monitoring {
     @GetMapping("/alerts") Object alerts() { return store.rows("select * from alerts order by id desc limit 100"); }
     @PostMapping("/alerts") @Transactional
     public Object alert(@RequestBody Alert input,HttpServletRequest req) {
-        store.one("select id from services where id=?",input.serviceId);
+        var service=store.one("select active from services where id=? for update",input.serviceId);
+        if(!Boolean.TRUE.equals(service.get("active"))) throw new Problem(409,"服务已停用");
         String source=Problem.text(input.source,100,"source");
         if(source.startsWith("am/")) throw new Problem(400,"该来源前缀保留给机器入口");
         String externalId=Problem.text(input.externalId,200,"externalId");

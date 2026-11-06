@@ -17,7 +17,7 @@ class Browse {
     static final Set<String> TASK_STATES = Set.of("PENDING", "RUNNING", "SUCCEEDED", "FAILED");
     static final Set<String> SEVERITIES = Set.of("INFO", "WARNING", "CRITICAL");
     private static final String TICKET_FROM = "tickets k join services s on s.id=k.service_id left join accounts u on u.id=k.assignee_id";
-    private static final String TICKET_FIELDS = "k.id,k.service_id,k.alert_id,k.title,k.status,k.assignee_id,k.version,k.created_at,s.name as service_name,u.username as assignee_name";
+    private static final String TICKET_FIELDS = "k.id,k.service_id,k.alert_id,k.title,k.status,k.priority,k.verification,k.assignee_id,k.version,k.created_at,s.name as service_name,u.username as assignee_name";
     private static final String ALERT_FROM = "alerts a join services s on s.id=a.service_id left join tickets k on k.alert_id=a.id";
     private static final String ALERT_FIELDS = "a.*,s.name as service_name,k.id as ticket_id";
     private static final String TASK_FROM = "tasks t join tickets k on k.id=t.ticket_id join services s on s.id=k.service_id";
@@ -59,17 +59,26 @@ class Browse {
         return new Page(items, total, page, size);
     }
 
+    Page tickets(int page,int size,String status,Long serviceId,Long assigneeId,String q) {
+        return tickets(page,size,status,serviceId,assigneeId,q,null);
+    }
+
     @GetMapping("/tickets/page")
     public Page tickets(@RequestParam(defaultValue="1") int page, @RequestParam(defaultValue="20") int size,
                         @RequestParam(required=false) String status, @RequestParam(required=false) Long serviceId,
-                        @RequestParam(required=false) Long assigneeId, @RequestParam(required=false) String q) {
+                        @RequestParam(required=false) Long assigneeId, @RequestParam(required=false) String q,
+                        @RequestParam(required=false) String priority) {
         var filters = new Filters();
         filters.id("k.service_id", serviceId);
         filters.id("k.assignee_id", assigneeId);
         filters.code("k.status", status, TICKET_STATES);
+        filters.code("k.priority",priority,Tickets.PRIORITIES);
         if (q != null && !q.isBlank()) {
             String term = Problem.text(q, 200, "q");
-            filters.clauses.add("(position(lower(?) in lower(k.title))>0 or cast(k.id as varchar)=?)");
+            filters.clauses.add("""
+                (position(lower(?) in lower(concat_ws(' ',k.title,k.review,k.impact,k.cause,k.uncertainty)))>0
+                 or cast(k.id as varchar)=?)
+                """);
             filters.values.add(term);
             filters.values.add(term.startsWith("#") ? term.substring(1) : term);
         }

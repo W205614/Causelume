@@ -1,6 +1,7 @@
 """Exercise the packaged jar and both Python services on loopback, using a fresh in-memory DB."""
 import os
 import secrets
+import base64
 import socket
 import subprocess
 import sys
@@ -54,7 +55,7 @@ def main():
                    EVIDENCE_TOKEN=reader), agent + "/health")
         start(stack, ["java", "-jar", "backend/target/causelume-1.0.0.jar"],
               dict(SERVER_PORT=java_port, SERVER_ADDRESS="127.0.0.1", APP_ADMIN_PASSWORD=admin,
-                   APP_OPERATOR_PASSWORD=operator, AGENT_URL=agent, AGENT_TOKEN=bearer, DEMO_URL=checkout,
+                   APP_OPERATOR_PASSWORD=operator, APP_MFA_KEY=base64.b64encode(secrets.token_bytes(32)).decode(), AGENT_URL=agent, AGENT_TOKEN=bearer, DEMO_URL=checkout,
                    EVIDENCE_TOKEN=reader, APP_DB_URL="jdbc:h2:mem:acceptance;DB_CLOSE_DELAY=-1"), app + "/api/health")
         subprocess.run([sys.executable, "scripts/e2e.py", "--app", app, "--checkout", checkout], check=True,
                        cwd=ROOT, env={**os.environ, "APP_ADMIN_PASSWORD": admin,
@@ -65,6 +66,8 @@ def main():
                        env={**os.environ, "CAUSELUME_URL": app, "CAUSELUME_ADMIN_PASSWORD": admin,
                             "CAUSELUME_VERIFY_EVIDENCE": "1"})
 
+        subprocess.run(["node", "frontend/tests/live-product.mjs"], cwd=ROOT, check=True,
+                       env={**os.environ, "CAUSELUME_URL": app, "CAUSELUME_ADMIN_PASSWORD": admin})
 
 if __name__ == "__main__":
     main()

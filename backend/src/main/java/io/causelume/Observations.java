@@ -13,8 +13,10 @@ class Observations {
     }
     @GetMapping("/{id}/{kind:metrics|logs}")
     Object observe(@PathVariable long id, @PathVariable String kind) {
-        var service = store.one("select name from services where id=?",id);
-        if (!"checkout".equals(service.get("name"))) throw new Problem(422,"该服务尚未登记证据来源");
+        var service = store.one("select source_id,service_label,active from services where id=?",id);
+        if (!Boolean.TRUE.equals(service.get("active")))throw new Problem(409,"服务已停用");
+        if (!"checkout-demo".equals(service.get("sourceId")) || !"checkout".equals(service.get("serviceLabel")))
+            throw new Problem(422,"此直接观测入口仅用于 checkout-demo；其他数据源请通过关联调查读取");
         var data = upstream.call("DEMO_URL","EVIDENCE_TOKEN","/"+kind,null,5);
         if (!"checkout".equals(data.path("service").asString(""))) throw new Problem(502,"证据来源无效");
         if (kind.equals("metrics") && (!data.path("requests").isIntegralNumber() || !data.path("errors").isIntegralNumber()
