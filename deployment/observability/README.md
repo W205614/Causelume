@@ -9,7 +9,7 @@
 3. 在 Java 管理界面将被监控服务绑定至 `prom-loki`，填入两个标签，执行连接检测。默认目标为 `causelume/local` 与 `example-service/local`。检测成功后应实际发起一个覆盖业务请求的历史窗口调查，查看两个来源、查询语句、时间、样本与覆盖程度。Prometheus 抓取间隔为 10 秒，窗口内只有一次抓取时计数器增量可能尚不可用。
 4. `service-alerts.yml` 将连续抓取失败或 5xx 增量发送到 Alertmanager。真实 webhook 以 `/run/secrets/ALERTMANAGER_TOKEN` 认证，firing 与 resolved 保持相同指纹。要接收平台自身的业务告警，应在服务目录登记 `serviceLabel=causelume`、`environment=local` 并设置负责人。自定义标签时以 Prometheus 的实际标签为准。整台平台宕机时需要机外探测并通过独立通道通知；后续恢复验证和工单关闭由人工执行。
 
-Prometheus TSDB 设置 7 天及约 2 GB 上限。Loki 使用单实例 TSDB、文件系统存储与 7 天保留期。Loki 的清理异步运行，7 天时间阈值不是硬磁盘水位；磁盘预算需另行监控。Loki 官方镜像不带 shell，探活使用网络内 `GET /ready` 与 Prometheus 的 `up` 采样。[Loki 保留机制](https://grafana.com/docs/loki/latest/operations/storage/retention/)
+Prometheus TSDB 设置 7 天及约 2 GB 上限。Loki 使用单实例 TSDB、文件系统存储与 7 天保留期，清理异步运行，磁盘容量另行监控。Loki 官方镜像不带 shell，探活使用网络内 `GET /ready` 与 Prometheus 的 `up` 采样。[Loki 保留机制](https://grafana.com/docs/loki/latest/operations/storage/retention/)
 
 ## 接入同一 Docker 主机上的另一个 Compose 项目
 
@@ -65,6 +65,6 @@ python agent/verify_observability.py
 python agent/verify_alertmanager.py
 ```
 
-第一个 Docker 验收创建独立项目并构建 Spring Boot 示例，使用在回环地址随机分配的测试端口读取真实 Prometheus 与 Loki。六类场景和事实判据在 `agent/evaluation-cases.json`。程序逐项检查不可抓取、5xx、慢请求、依赖拒绝连接、无数据、日志注入。所有采集都走实际 Micrometer、Prometheus、Alloy、Loki；离线规则的结果不能用于推断真实模型准确率或生产 SLO。
+第一个 Docker 验收创建独立项目并构建 Spring Boot 示例，使用在回环地址随机分配的测试端口读取真实 Prometheus 与 Loki。六类场景和事实判据在 `agent/evaluation-cases.json`。程序逐项检查不可抓取、5xx、慢请求、依赖拒绝连接、无数据、日志注入。采集使用实际 Micrometer、Prometheus、Alloy、Loki，分析使用离线规则。
 
 第二个 Docker 验收用生产 Alertmanager 配置连接隔离网络内的捕获器，核对真实 HTTP 请求的 Bearer、路径、状态和指纹。它覆盖告警投递协议；Java webhook 的鉴权、幂等与派工另外由后端测试验证。两个脚本都使用独立随机项目名，只回收各自的临时容器、卷与网络。六场景验收的就绪等待最多 100 秒，每个样本的观测轮询最多 25 秒，慢请求、网络读取和构建另计。CI 建议为首次镜像/依赖下载预留独立任务超时；Alertmanager 黑盒运行上限为 180 秒。

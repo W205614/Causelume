@@ -17,6 +17,6 @@ POST `/api/tickets/{id}/improvements` 填写 title、ownerId、dueDate。工单�
 
 详情展示最新 50 条时间线记录，按发生顺序排列。字段 timelineTotal 记录总数。GET `/api/tickets/{id}/timeline?page=1&size=20` 按最新记录优先分页，每页最多 100 条。工单分页查询增加 priority 筛选，q 可匹配标题、复盘、影响、原因、不确定性或完整编号。
 
-管理员或工单负责人可 GET `/api/tickets/{id}/export?format=json` 或 format=markdown。导出工单、结构化复盘、处理记录、改进项及调查元数据，每类记录最多 1000 条。超出返回 413。完整原始日志与模型证据保留在调查详情。导出写入审计。管理员可 GET `/api/retention/preview?days=90` 预览截止日前的审计、通知、已恢复告警、最后一次关闭早于截止时间的已关闭工单及已结束调查数。此接口只有读取能力。
+管理员或工单负责人可 GET `/api/tickets/{id}/export?format=json` 或 format=markdown。导出工单、结构化复盘、处理记录、改进项及调查元数据，每类记录最多 1000 条。超出返回 413。完整调查分析与采样证据保留在调查详情。导出写入审计。管理员可 GET `/api/retention/preview?days=90` 预览截止日前的审计、通知、已恢复告警、最后一次关闭早于截止时间的已关闭工单及已结束调查数。此接口只有读取能力。
 
 验证命令为 `mvn -f backend/pom.xml -Dtest=IncidentReviewTest,ServiceSourceTest,BrowseTest,OperationsTest test`。

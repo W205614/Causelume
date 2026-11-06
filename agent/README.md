@@ -33,9 +33,9 @@ Java 绑定服务的数据源、`service` 和 `environment` 标签，并创建�
 
 模型配置使用 `holmes-observations.yaml`。`gpt-6.1-sol` 通过 `LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES=true` 走官方 Responses API。生产部署使用 `max_steps: 4`、`OVERRIDE_MAX_CONTENT_SIZE=16384`、`OVERRIDE_MAX_OUTPUT_TOKEN=1200` 和 `ENABLE_CONVERSATION_HISTORY_COMPACTION=false`。上下文预算包含上游框架提示和工具响应。源响应每项上限 128 KiB、Holmes 响应上限 512 KiB；最多保存 2 项初始证据、8 项实际调用结果和 3 段各不超过 2000 个码点的建议。[OpenAI 模型文档](https://developers.openai.com/api/docs/models/gpt-6.1-sol) · [Holmes 用量和上下文实现](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/holmes/core/llm.py)
 
-本地和生产编排显式设置 `LLM_REQUEST_TIMEOUT=60`、`LLM_RATE_LIMIT_MAX_WAIT_SECONDS=0`。Holmes 默认单次请求超时600秒、部分容量错误可等待重试30秒，与平台80秒上游等待不一致；现在单次模型请求限时60秒，并关闭这层隐式重试。四步调查仍可能超过平台总等待，出现超时应按结果未知保留额度，不能自动重发。断网黑盒使用真实Holmes连接返回503的模型协议替身，确认只收到一次请求且调查明确失败。
+本地和生产编排设置 `LLM_REQUEST_TIMEOUT=60`、`LLM_RATE_LIMIT_MAX_WAIT_SECONDS=0`：单次模型请求限时60秒，关闭Holmes隐式重试。平台等待Holmes响应的总期限为80秒；四步调查超期时记录超时，保留待核对额度，由管理员核查实际执行和费用。断网回归连接返回503的模型协议替身，确认只发送一次请求并报告失败。
 
-`usage` 记录配置模型名、提示版本 `frozen-observations-v2` 及上游返回的汇总输入/输出令牌。缺失或仅有上游默认零值时记为 `null`。`estimatedCostUsd` 仅保留上游正数估算。Holmes 的响应不是供应商账单，因此已发生真实模型调用时 `costUsd=null`，由 Java 保留未核实金额供人工核对。只有确认未调用模型时才记 `costUsd=0`。单任务预留额约束本系统准入，不能替代供应商账户硬限额。[上游锁定版本](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/poetry.lock) · [上游许可证](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/LICENSE)
+`usage` 记录配置模型名、提示版本 `frozen-observations-v2` 及上游返回的汇总输入/输出令牌。缺失或仅有上游默认零值时记为 `null`。`estimatedCostUsd` 保存上游正数估算；真实模型执行后 `costUsd=null`，管理员根据供应商账单核对Java预算记录。确认未调用模型时记为 `costUsd=0`。单任务预留额用于平台准入，供应商账户限额在供应商侧设置。[上游锁定版本](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/poetry.lock) · [上游许可证](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/LICENSE)
 
 ## Checkout 演示兼容
 

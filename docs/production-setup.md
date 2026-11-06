@@ -1,6 +1,6 @@
 # Linux 单实例小团队接入手册
 
-本手册供已验证候选版本接入外部资源使用。主机、域名、SMTP、异地仓库和外部探测均由操作者准备。配置和自动化入口已提供，接入时通过实测填写验收记录。当前采用共享运维工作区，成员可读取服务、工单与诊断证据；有跨团队保密要求时，先明确数据隔离方案，不能直接扩大共享范围。
+本手册包含主机准备、外部服务配置、备份恢复和版本更新步骤。准备主机、域名、SMTP、异地仓库和外部探测后，按对应章节接入。部署采用共享运维工作区，成员共享查看服务、工单和诊断证据；部署前确认参与成员与数据可见范围。
 
 ## 首次主机准备
 
@@ -15,15 +15,15 @@ docker compose --env-file production.env -f compose.production.yaml -f compose.o
 sh scripts/release.sh
 ~~~
 
-平台与被监控项目共用主机时，按真实采集量测量内存、CPU、IO及磁盘增长。配置中的资源上限是保护边界，容量承诺须由实测给出。示例服务提供可复现故障，可在接入真实项目后按需要停用。
+平台与被监控项目共用主机时，按实际采集量测量内存、CPU、IO及磁盘增长，再调整配置中的资源上限。示例服务提供可复现故障，接入实际项目后可按需停用。
 
 ## 域名和 HTTPS
 
 APP_DOMAIN 填域名，不带 https://；非标准端口需显式设置相应入口。ACME_EMAIL 填证书维护邮箱。DNS A/AAAA 必须指向可达主机，80/443 应从外部到达 Caddy。APP_PUBLIC_ORIGIN 由编排生成，生产会话强制 Secure 与 MFA。
 
-首次使用环境中的 APP_ADMIN_PASSWORD/APP_OPERATOR_PASSWORD 初始化账户。进入账户安全绑定验证器、保存单次恢复码，再设置通知邮箱。已有数据库不会通过改变初始密码重置账户。应先轮换本次项目历史中曾通过聊天发送过的模型密钥。
+首次使用环境中的 APP_ADMIN_PASSWORD/APP_OPERATOR_PASSWORD 初始化账户。进入账户安全绑定验证器、保存单次恢复码，再设置通知邮箱。已有数据库的密码通过账户维护操作修改。部署使用专用模型密钥，已公开或共享过的密钥先完成轮换。
 
-真实验收包括证书链、域名、HTTP跳转、MFA/恢复码、退出登录、停用会话和机外访问。localhost 自签证书演练不能替代公网证书验收。
+在实际域名下检查证书链、HTTP跳转、MFA/恢复码、退出登录和停用会话，并从机外验证访问结果。
 
 ## SMTP 与通知
 
@@ -31,7 +31,7 @@ production.env 配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_FROM，secret
 
 投递过程有站内记录。临时拒绝按10秒、1分钟、5分钟最多重试三次；明确永久拒绝终止，发送结果不明不自动重发。管理员在通知中心的「邮件投递管理」查看失败与未知记录。人工重发可能产生重复，需填写依据。
 
-验证实际收件、垃圾邮件与服务商限额。测试中的 Mailpit 只证明本地SMTP协议与业务记录；真实送达待服务商配置后验证。
+Mailpit用于本地SMTP协议和业务记录测试。配置服务商后，验证实际收件、垃圾邮件归类和发送限额。
 
 ## 真实应用与观测
 
@@ -45,7 +45,7 @@ production.env 配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_FROM，secret
 
 默认 AGENT_MODE=offline。准备有效凭据后，将 OPENAI_API_KEY 写入专用secret，AGENT_MODE=holmes，COMPOSE_PROFILES=holmes，并填写 MODEL_DAILY_BUDGET_USD 与 MODEL_RESERVATION_USD。更新配置重建相应容器后，从工单人工发起。
 
-Java在事务中预留额度，明确授权的任务才可进入模型请求。无预留旧请求即使遇到模式切换也不能自动付费。上下文限制16384、输出1200、最多4步；费用预留是平台准入策略，供应商实际计费需核对。未知费用保持冻结，管理员填写账单依据后结算。外部模型调用需要另行授权后验证。
+Java在事务中预留额度，持有预留的人工调查才进入模型请求；切换至holmes模式后，已有的无预留任务由Agent返回422。上下文限制16384、输出1200、最多4步。费用预留用于平台准入，实际计费按供应商账单核对；未知费用保持冻结，管理员填写账单依据后结算。
 
 ## 初始化和启用异地备份
 
@@ -59,7 +59,7 @@ docker compose --env-file production.env -f compose.production.yaml --profile ma
 docker compose --env-file production.env -f compose.production.yaml --profile maintenance run --rm backup
 ~~~
 
-备份在共享暂存卷上使用flock互斥；重叠任务明确失败，不会覆盖正在生成的备份。获得锁后注册退出清理，普通成功和失败路径都清除暂存明文；被强制终止时仍可能留下受限暂存，排查时不要将其当成有效恢复集。恢复使用单事务导入，并重新撤销业务账号对迁移历史的写权限。
+备份在共享暂存卷上使用flock互斥，重叠任务返回失败，正在生成的备份保持原状。获得锁后注册退出清理，普通成功和失败路径都清除暂存明文；强制终止遗留的暂存用于排查，恢复使用通过归档摘要和隔离恢复校验的完整恢复集。恢复使用单事务导入，并重新撤销业务账号对迁移历史的写权限。
 
 备份包含一致 pg_dump、摘要和版本记录。定时备份记录配置的 APP_RELEASE。升级前备份从当前或已停的旧 app 容器读取镜像摘要，记录为 `pre-upgrade:<旧镜像摘要>`；使用标签启动的旧容器记录实际镜像 ID。旧 app 容器已移除时标记 `pre-upgrade:unknown`。每个快照的 `/config` 包含备份当时的 production.env、两份生产 Compose 文件、heartbeat.env、secrets/、deployment/（包括主机定制的采集目标、日志标签和数据源）及 agent/holmes-observations.yaml。灾难恢复时将这些文件按原路径放回发布目录，再运行密钥初始化脚本校正权限并保留恢复值。配置内容敏感，即便是加密归档也需限制访问。工作卷使用固定暂存文件；restic历史快照不自动prune。保留/清理先预览并按所有者确认的策略执行。
 
@@ -75,15 +75,15 @@ docker compose --env-file production.env -f compose.production.yaml --profile re
 
 恢复任务只连接独立 restore 网络的临时PostgreSQL。它先校验加密仓库和归档摘要，恢复到独立库，使用迁移角色建表并验证应用角色可读取核心业务表计数。scratch数据库与恢复目录使用临时内存存储，较大备份应提前调整容量。脚本不会替换在线数据库。
 
-首次和每月使用同一流程演练，并检查关键工单、证据和反馈。主机灾难恢复时，从备份恢复配置和secret到受限路径，初始化独立角色，恢复匹配版本数据库，通过应用登录/只读/API验证后再切换入口。RPO24小时、RTO2小时须以真实异地仓库和新主机的计时证明，不能用本地临时仓库的结果替代。
+首次和每月使用同一流程演练，并检查关键工单、证据和反馈。主机灾难恢复时，从备份恢复配置和secret到受限路径，初始化独立角色，恢复匹配版本数据库，通过应用登录/只读/API验证后再切换入口。使用异地仓库在新主机上演练，记录最近可恢复时间与恢复耗时，核对RPO24小时、RTO2小时的目标。
 
 数据库已应用新迁移后，旧镜像是否可用取决于兼容性。回退需采用已验证的兼容版本或一整套恢复集，保留原失败现场。
 
 ## 机外探测
 
-初始化脚本从 deployment/systemd/heartbeat.env.example 创建 /opt/causelume/heartbeat.env，保留已有值。填真实 PUBLIC_HEALTH_URL、EXTERNAL_HEARTBEAT_URL，权限0600。DISK_CHECK_PATH 指向实际 Docker 数据目录（用 docker info --format 检查 DockerRootDir），MIN_FREE_DISK_KIB 默认为5 GiB。安装 causelume-heartbeat.service/timer，按服务商要求设置周期和宽限。探测脚本先检查主机该分区空间、公网TLS/数据库健康，再发送心跳；任何检查失败都不发送成功心跳。应用容器的磁盘指标只代表该容器工作目录所在文件系统，不能替代主机分区检查。备份年龄由独立备份心跳的周期和宽限监控，需在机外服务设定不超过24小时的告警窗口。
+初始化脚本从 deployment/systemd/heartbeat.env.example 创建 /opt/causelume/heartbeat.env，保留已有值。填真实 PUBLIC_HEALTH_URL、EXTERNAL_HEARTBEAT_URL，权限0600。DISK_CHECK_PATH 指向实际 Docker 数据目录（用 docker info --format 检查 DockerRootDir），MIN_FREE_DISK_KIB 默认为5 GiB。安装 causelume-heartbeat.service/timer，按服务商要求设置周期和宽限。探测脚本先检查主机该分区空间、公网TLS/数据库健康，再发送心跳；任何检查失败都不发送成功心跳。应用容器的磁盘指标覆盖其工作目录所在文件系统，其他宿主分区按路径单独检查。备份年龄由独立备份心跳的周期和宽限监控，需在机外服务设定不超过24小时的告警窗口。
 
-分别停止平台和备份心跳，确认机外服务发送通知。探测服务必须位于该云主机之外；同机告警无法覆盖整机停电或网络中断。
+在独立于平台主机的探测服务中配置通知，覆盖整机停电或网络中断。分别停止平台和备份心跳，确认告警能送达。
 
 外部资源配置完成且首次手工备份/恢复通过后，安装并启用定时任务：
 
@@ -94,7 +94,7 @@ sudo systemctl enable --now causelume-backup.timer causelume-restore.timer cause
 systemctl list-timers 'causelume-*'
 ~~~
 
-用 `journalctl -u causelume-backup.service`、`journalctl -u causelume-restore.service` 检查结果；机外服务另行验证漏心跳通知。没有配置外部资源时不要启用这些生产任务。
+启用后，用 `journalctl -u causelume-backup.service`、`journalctl -u causelume-restore.service` 检查结果，并验证机外服务的漏心跳通知。
 
 ## 发布与升级
 
@@ -102,4 +102,4 @@ systemctl list-timers 'causelume-*'
 
 ## 镜像发布权限排障
 
-发布工作流使用仓库 GITHUB_TOKEN 的 packages:write 权限，镜像附带本仓库 source/revision 标签。若 GHCR 返回 denied，由包所有者在 GitHub Packages 的包设置中核对关联仓库为 W205614/Causelume，并在 Manage Actions access 中授予该仓库 Write。已存在但未关联的同名包不会仅凭仓库写权限自动开放；操作按 [GitHub官方权限说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) 执行。不要将个人令牌写入仓库或用取消扫描替代权限配置。实际推送及 release-manifest 成功后再填写生产镜像摘要。
+发布工作流使用仓库 GITHUB_TOKEN 的 packages:write 权限，镜像附带本仓库 source/revision 标签。若 GHCR 返回 denied，由包所有者在 GitHub Packages 的包设置中核对关联仓库为 W205614/Causelume，并在 Manage Actions access 中授予该仓库 Write。具体步骤见 [GitHub官方权限说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。凭据通过GitHub Secrets或标准输入提供，发布流程保留安全扫描；推送成功后，将release-manifest中的摘要填入生产配置。
