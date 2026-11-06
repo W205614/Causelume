@@ -33,6 +33,14 @@ class OfflineStorage {
                     user==null?"":user,password==null?"":password)) {
                 export(db,Path.of(args[3]));
             }
+        } else if (args.length==2 && args[1].equals("migrate-pg")) {
+            var pg=postgres(true);
+            Flyway.configure().dataSource(pg)
+                    .locations("classpath:db/postgresql", "classpath:db/common").load().migrate();
+            // The schema owner's default grants also apply to Flyway's own history on first install.
+            try(var db=pg.getConnection();var sql=db.createStatement()) {
+                sql.execute("revoke insert,update,delete on public.flyway_schema_history from causelume_app");
+            }
         } else if (args.length==3 && args[1].equals("import-pg")) {
             var pg=postgres(true);
             load(pg,Path.of(args[2]),secret("APP_DB_USER"));
@@ -47,7 +55,7 @@ class OfflineStorage {
                 Arrays.fill(input,'\0');
             }
             try(var db=postgres(false).getConnection()) { recoverAdmin(db,args[2],password); }
-        } else throw new IllegalArgumentException("storage export-h2 <base> <new.jsonl> | import-pg <file.jsonl> | recover-admin <username>");
+        } else throw new IllegalArgumentException("storage export-h2 <base> <new.jsonl> | migrate-pg | import-pg <file.jsonl> | recover-admin <username>");
         System.out.println("Offline storage operation completed.");
     }
     private static String secret(String name) throws IOException {

@@ -1,6 +1,6 @@
 import { productAction, notificationsPage, budgetPage } from "./product.js";
 import { accountPage, accountAction, clearAccountSecrets } from "./account.js";
-import { demo, request } from "./api.js";
+import { demo, request as apiRequest } from "./api.js";
 import {
   esc,
   brand,
@@ -24,7 +24,29 @@ let me,
   data,
   ticket,
   task,
-  epoch = 0;
+  epoch = 0,
+  session = 0;
+
+function endSession() {
+  session++;
+  clearAccountSecrets();
+  me = data = ticket = task = null;
+  if (dialog.open) dialog.close();
+  dialog.replaceChildren();
+  document.querySelectorAll(".write-notice").forEach(notice => notice.remove());
+  void render();
+}
+
+async function request(path, body) {
+  const started = session;
+  try {
+    return await apiRequest(path, body);
+  } catch (err) {
+    if (err.status === 401 && me && started === session && path !== "/login")
+      endSession();
+    throw err;
+  }
+}
 const mode = () =>
   '<span class="mode ' +
   (demo ? "warning" : "") +
@@ -49,6 +71,7 @@ function login() {
     b.disabled = true;
     try {
       me = await request("/login", Object.fromEntries(new FormData(f)));
+      session++;
       await render();
     } catch (err) {
       f.querySelector(".error").textContent = err.message;
@@ -196,11 +219,6 @@ function scheduleUpdates(page, id, params, version) {
       scheduleUpdates(page, id, params, version);
     } catch (err) {
       if (epoch === version) {
-        if (err.status === 401) {
-          me = null;
-          await render();
-          return;
-        }
         const message = document.createElement("p");
         message.className = "retry";
         message.setAttribute("role", "alert");
@@ -248,6 +266,8 @@ async function render() {
         : data.service
           ? observations(data.service, data.metrics, data.logs)
           : views[page](data);
+    for (const segment of main.querySelectorAll(".track [data-count]"))
+      segment.style.flexGrow = segment.dataset.count;
     const filters = main.querySelector("form[data-filter]");
     if (filters)
       filters.onsubmit = (e) => {
@@ -262,11 +282,6 @@ async function render() {
     scheduleUpdates(page, id, params, version);
   } catch (err) {
     if (version !== epoch) return;
-    if (err.status === 401) {
-      me = null;
-      login();
-      return;
-    }
     main.innerHTML =
       '<div class="retry"><p class="error" role="alert">' +
       esc(err.message) +
@@ -368,7 +383,7 @@ function form(title, fields, send, review) {
       f.querySelector(".error").textContent = err.message;
       if (err.status === 409 && review) {
         try {
-          const message = await review();
+          const message = await review(f);
           if (current()) {
             f.querySelector(".error").textContent = message;
             btn.textContent = "重新确认";
@@ -376,7 +391,7 @@ function form(title, fields, send, review) {
         } catch (readError) {
           if (current())
             f.querySelector(".error").textContent =
-              "读取最新工单失败，请关闭后刷新核对。" + readError.message;
+              "读取最新记录失败，请关闭后刷新核对。" + readError.message;
           btn.dataset.blocked = "1";
         }
       }
@@ -389,9 +404,12 @@ root.onclick = async (e) => {
   const btn = e.target.closest("[data-op]");
   if (!btn) return;
   const [op, arg] = btn.dataset.op.split(":");
-  if (await accountAction(op, { form, input, request, render, me, refreshMe: async (logout = false) => {
-    me = logout ? null : await request("/me");
-    if (logout) { clearAccountSecrets(); await render(); }
+  const started = session;
+  if (await accountAction(op, { form, input, request, render, me, sameSession: () => started === session, refreshMe: async (logout = false) => {
+    if (started !== session) return;
+    if (logout) return endSession();
+    const fresh = await request("/me");
+    if (started === session) me = fresh;
   } })) return;
   const actionEpoch = epoch;
   try {
@@ -410,11 +428,9 @@ root.onclick = async (e) => {
   if (op === "logout") {
     try {
       await request("/logout", {});
-      me = null;
-      clearAccountSecrets();
-      await render();
+      if (started === session) endSession();
     } catch (err) {
-      form("退出失败", "<p>" + esc(err.message) + "</p>", async () => {});
+      if (started === session) form("退出失败", "<p>" + esc(err.message) + "</p>", async () => {});
     }
     return;
   }

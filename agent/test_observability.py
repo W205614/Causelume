@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,6 +24,8 @@ class ObservabilityTests(unittest.TestCase):
                           "DEMO_URL": ""}))
         self.source = Flask("observability-source")
         self.args = {}
+        self.metric_offset = 0
+        self.stream = {"service": "web", "environment": "dev", "unexpected": "MUST_NOT_APPEAR"}
 
         @self.source.get("/api/v1/query")
         def metrics():
@@ -30,8 +33,9 @@ class ObservabilityTests(unittest.TestCase):
             # Credentials are injected after selecting the URL from a trusted file.
             if request.headers.get("Authorization") != "Bearer fixture-bearer":
                 return {}, 401
+            evaluated = datetime.fromisoformat(request.args["time"]).timestamp() if "time" in request.args else 1
             return {"status": "success", "data": {"resultType": "vector", "result": [
-                {"metric": {"signal": "min_up"}, "value": [1, "0"]}]}}
+                {"metric": {"signal": "min_up"}, "value": [evaluated + self.metric_offset, "0"]}]}}
 
         @self.source.get("/loki/api/v1/query_range")
         def logs():
@@ -39,7 +43,7 @@ class ObservabilityTests(unittest.TestCase):
             stamp = int(request.args.get("end", "3")) - 1
             line = '{"event":"dependency_timeout","status":502,"password":"MUST_NOT_APPEAR","message":"arbitrary prompt"}'
             return {"status": "success", "data": {"resultType": "streams", "result": [
-                {"stream": {"unexpected": "MUST_NOT_APPEAR"}, "values": [[str(stamp - i), line] for i in range(4)]}]}}
+                {"stream": self.stream, "values": [[str(stamp - i), line] for i in range(4)]}]}}
 
         self.url = self.enterContext(http_service(self.source))
         self.profile = {"id": "testing", "name": "只读源", "prometheus": {"url": self.url,
@@ -104,6 +108,21 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(result["completeness"], "partial")
         self.assertIsNone(result["effectiveRange"])
         self.assertTrue(all(v["status"] == "pending" and v["query"] is None for v in result["observations"].values()))
+
+    def test_wrong_service_environment_or_evaluation_time_rejects_only_that_source(self):
+        for key in ("service", "environment", "time"):
+            with self.subTest(key=key):
+                if key == "time":
+                    self.metric_offset = -60
+                else:
+                    self.stream[key] = "other-team"
+                result = self.client.post("/investigate", json=self.body, headers=auth("fixture-agent")).json
+                failed, good = ("metrics", "logs") if key == "time" else ("logs", "metrics")
+                view = result["observations"][failed]
+                self.assertEqual((result["completeness"], view["status"], view["samples"]), ("partial", "error", []))
+                self.assertIn("时间" if key == "time" else "标签", view["error"])
+                self.assertTrue(result["observations"][good]["samples"])
+                self.stream.update(service="web", environment="dev")
 
     def test_one_failing_source_preserves_other_source(self):
         refused = Flask("redirect-source")

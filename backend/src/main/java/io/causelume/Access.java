@@ -41,6 +41,7 @@ class Access implements WebMvcConfigurer, HandlerInterceptor {
         };
     }
     static Actor actor(HttpServletRequest req) {
+        if(req.getAttribute("currentActor") instanceof Actor current) return current;
         var session=req.getSession(false);
         if (session == null || !(session.getAttribute("actor") instanceof Actor actor)) throw new Problem(401,"请先登录");
         return actor;
@@ -64,10 +65,15 @@ class Access implements WebMvcConfigurer, HandlerInterceptor {
         if (path.equals("/api/health") || path.equals("/api/login")
                 || (req.getMethod().equals("POST") && path.matches("/api/integrations/alertmanager/[A-Za-z0-9_-]{1,64}"))) return true;
         Actor actor=actor(req);
-        var versions=store.rows("select auth_version from accounts where id=? and active=true",actor.id());
+        var versions=store.rows("select auth_version,email from accounts where id=? and active=true",actor.id());
         if (versions.isEmpty() || actor.authVersion()!=(long)versions.getFirst().get("authVersion")) {
             req.getSession().invalidate();
             throw new Problem(401,"账户状态已变更，请重新登录");
+        }
+        String email=(String)versions.getFirst().get("email");
+        if (!java.util.Objects.equals(email,actor.email())) {
+            req.setAttribute("currentActor",new Actor(actor.id(),actor.username(),actor.role(),email,
+                actor.mfaEnabled(),actor.enrollmentRequired(),actor.authVersion()));
         }
         if (actor.enrollmentRequired() && !java.util.Set.of("/api/me","/api/logout","/api/account/mfa/enroll","/api/account/mfa/confirm").contains(path))
             throw new Problem(403,"请先完成双因素认证绑定");

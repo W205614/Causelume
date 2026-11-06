@@ -155,7 +155,7 @@ export function overview({ summary: s }) {
           (key) =>
             '<i class="' +
             key +
-            '" style="flex-grow:' +
+            '" data-count="' +
             Number(counts[key]) +
             '"></i>',
         )
@@ -608,10 +608,11 @@ export function detail(
     actions += button("action:ASSIGN", "改派");
   if (next) actions += button("action:NOTE", "添加记录");
   if (admin || actorId === t.assigneeId) {
-    actions += button("priority", "优先级") + button("improvement", "改进事项");
+    if (t.status !== "CLOSED") actions += button("priority", "优先级");
+    actions += button("improvement", "改进事项");
     if (t.status === "CLOSED") actions += button("reopen", "重新打开");
+    actions += '<a href="/api/tickets/' + t.id + '/export?format=markdown" download>导出复盘</a>';
   }
-  actions += '<a href="/api/tickets/' + t.id + '/export?format=markdown" download>导出复盘</a>';
   const related = tasks.filter((task) => task.ticketId === t.id);
   if (
     ["ASSIGNED", "PROCESSING"].includes(t.status) &&
@@ -663,7 +664,7 @@ export function detail(
     (t.impact ? panel("结构化复盘", '<div class="pad"><p>影响范围 ' + esc(t.impact) + '</p><p>发生 ' + time(t.incidentStartedAt) +
       ' · 恢复 ' + time(t.incidentEndedAt) + '</p><h3>原因</h3><p>' + esc(t.cause) + '</p><h3>不确定性</h3><p>' + esc(t.uncertainty) + '</p></div>') : "") +
     panel("改进事项", '<div class="pad">' + (t.improvements || []).map(item => '<p>' + esc(item.title) + ' · ' + esc(item.status) + ' · 负责人 #' + esc(item.ownerId) + ' · 截止 ' + esc(item.dueDate) +
-      (item.status !== "DONE" && (admin || actorId === t.assigneeId) ? button("improvementDone:" + item.id, "标记完成") : "") + '</p>').join("") + '</div>') +
+      (item.status !== "DONE" && (admin || actorId === t.assigneeId || actorId === item.ownerId) ? button("improvementDone:" + item.id, "标记完成") : "") + '</p>').join("") + '</div>') +
     panel(
       "关联调查",
       '<div class="pad stack">' +

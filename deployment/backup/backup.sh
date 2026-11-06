@@ -13,6 +13,9 @@ if [ "$#" -ne 0 ]; then
   printf '%s\n' 'usage: backup [init]' >&2
   exit 2
 fi
+exec 9>/work/backup.lock
+flock -n 9 || { printf '%s\n' 'Another backup is using the staging volume; this run did not start.' >&2; exit 1; }
+trap 'rm -f /work/causelume.dump /work/dump.sha256 /work/release.txt' EXIT
 export PGPASSWORD="$(cat /run/secrets/APP_MIGRATOR_PASSWORD)"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 file="/work/causelume.dump"

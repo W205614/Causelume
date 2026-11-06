@@ -12,7 +12,8 @@ restic restore latest --tag causelume --target /restore
 test -s /restore/work/causelume.dump
 test -s /restore/work/release.txt
 (cd /restore/work && sha256sum -c dump.sha256)
-pg_restore -h restore-postgres -U causelume_migrator -d causelume --no-owner --no-acl --exit-on-error /restore/work/causelume.dump
+pg_restore -h restore-postgres -U causelume_migrator -d causelume --no-owner --no-acl --single-transaction --exit-on-error /restore/work/causelume.dump
+psql -h restore-postgres -U causelume_migrator -d causelume -v ON_ERROR_STOP=1 -c 'REVOKE INSERT, UPDATE, DELETE ON TABLE public.flyway_schema_history FROM causelume_app'
 export PGPASSWORD="$(cat /run/secrets/APP_DB_PASSWORD)"
 for table in accounts services alerts tickets tasks timeline audit; do
   pg_restore --data-only --table="$table" --file=/restore/table.sql /restore/work/causelume.dump

@@ -20,15 +20,18 @@ export function accountPage(me) {
       recoveryCodes.map(esc).join("\n") + '</pre><button data-op="mfaSaved">已安全保存</button></div>' : "") +
     '</div></section>';
 }
-export async function accountAction(op, { form, input, request, refreshMe, render, me }) {
+export async function accountAction(op, { form, input, request, refreshMe, render, me, sameSession }) {
   if (op === "mfaEnroll") {
     form("绑定验证器", input("password", "当前密码", "password"), async values => {
-      enrollment = await request("/account/mfa/enroll", values);
+      const response = await request("/account/mfa/enroll", values);
+      if (!sameSession()) return;
+      enrollment = response;
       return "account";
     });
   } else if (op === "mfaConfirm") {
     form("验证二次验证器", input("code", "六位验证码"), async values => {
       const response = await request("/account/mfa/confirm", values);
+      if (!sameSession()) return;
       recoveryCodes = response.recoveryCodes;
       enrollment = undefined;
       await refreshMe();

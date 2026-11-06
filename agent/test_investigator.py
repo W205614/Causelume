@@ -83,6 +83,50 @@ class InvestigationTests(unittest.TestCase):
             self.agent = investigator.create_app().test_client()
         self.assertEqual(self.run_task().status_code, 502)
 
+    def test_internal_calls_bypass_proxy_and_drop_untrusted_demo_event(self):
+        proxy, demo, holmes = (Flask(name) for name in ("capture-proxy", "changed-demo", "model"))
+        proxy_calls, model_inputs = [], []
+        secret = "example-password-in-log"
+
+        @proxy.before_request
+        def capture():
+            proxy_calls.append(request.path)
+            return {}, 403
+
+        @demo.get("/snapshot")
+        def snapshot():
+            self.assertEqual(request.headers["Authorization"], "Bearer test-reader")
+            stamp = "2026-01-01T00:00:00Z"
+            return {"service": "checkout", "snapshotId": "a" * 32, "sampledAt": stamp, "requests": 1,
+                    "errors": 1, "latestError": {"id": "b" * 32, "at": stamp, "event": secret, "status": 503}}
+
+        @holmes.get("/api/info")
+        def info():
+            self.assertEqual(request.headers["Authorization"], "Bearer test-holmes")
+            return {"auth_enabled": True, "toolsets": [
+                {"name": "causelume_observations", "enabled": True, "status": "enabled", "tool_count": 2}]}
+
+        @holmes.post("/api/chat")
+        def chat():
+            view = base64.urlsafe_b64decode(request.headers["X-Causelume-Logs"] + "===").decode()
+            model_inputs.extend((request.json["ask"], view))
+            return {"analysis": json.dumps(dict.fromkeys(investigator.FIELDS, "test")), "tool_calls": []}
+
+        proxy_url = self.enterContext(http_service(proxy))
+        with patch.dict(os.environ, {"http_proxy": proxy_url, "HTTP_PROXY": proxy_url,
+                                     "no_proxy": "unused.invalid", "NO_PROXY": "unused.invalid",
+                                     "AGENT_MODE": "holmes", "HOLMES_API_KEY": "test-holmes",
+                                     "HOLMES_URL": self.enterContext(http_service(holmes)),
+                                     "DEMO_URL": self.enterContext(http_service(demo))}):
+            self.agent = investigator.create_app().test_client()
+            result = self.run_task()
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(proxy_calls, [])
+        self.assertEqual(len(model_inputs), 2)
+        for observed in [result.text, *model_inputs]:
+            self.assertNotIn(secret, observed)
+            self.assertIn("unclassified", observed)
+
     def test_model_http_contract_and_failures(self):
         holmes = Flask("holmes-contract-double")
         enabled = [{"name": "causelume_observations", "enabled": True, "status": "enabled", "tool_count": 2}]

@@ -14,7 +14,8 @@
 | 调用业务接口 | [API 契约](../backend/API.md) |
 | 检查认证、Origin、配额和错误边界 | [安全边界](../backend/SECURITY.md) |
 | 开发或验证控制台 | [前端说明](../frontend/README.md) |
-| 核对个人版候选的证据与未运行项 | [候选验收](personal-release.md) |
+| 核对本轮小团队加固、升级与清理结果 | [小团队交付记录](team-release-2026-11-06.md) |
+| 核对个人版候选的历史证据与未运行项 | [候选验收](personal-release.md) |
 | 核对源码、容器版本与本轮文档审查 | [状态核验 · 2026-11-06](status-2026-11-06.md) |
 
 原始建设与本地部署历史保留在 [实施记录](implementation.md)、[早期验收](verification.md) 和 [增量审查](review-2026-11-06.md)。它们不能替代当前版本的发布与上线检查。

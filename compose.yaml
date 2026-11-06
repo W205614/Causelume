@@ -6,6 +6,7 @@ services:
       APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:?run scripts/init_env.py}
       APP_OPERATOR_PASSWORD: ${APP_OPERATOR_PASSWORD:?run scripts/init_env.py}
       APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-}
+      APP_MFA_KEY: ${APP_MFA_KEY:-}
       APP_DB_URL: jdbc:h2:file:/app/data/causelume
       DEMO_URL: http://checkout:8092
       EVIDENCE_TOKEN: ${EVIDENCE_TOKEN:?required}

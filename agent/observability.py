@@ -105,15 +105,20 @@ def timestamp():
 def target(service, environment):
     if not all(isinstance(v, str) and LABEL.fullmatch(v) for v in (service, environment)):
         abort(400, "service 和 environment 必须为 1–80 位 ASCII 标签")
-    return f'service="{service}",environment="{environment}"'
+    return {"service": service, "environment": environment}
+
+
+def selector(labels):
+    return ",".join(f'{key}="{value}"' for key, value in labels.items())
 
 
 def check_profile(profile, labels):
+    match = selector(labels)
     def check(kind):
         if kind == PROM:
-            path, params = "/api/v1/query", {"query": f"up{{{labels}}}", "limit": 1, "timeout": "2s"}
+            path, params = "/api/v1/query", {"query": f"up{{{match}}}", "limit": 1, "timeout": "2s"}
         else:
-            path, params = "/loki/api/v1/query_range", {"query": "{" + labels + "}", "limit": 1, "since": "1m"}
+            path, params = "/loki/api/v1/query_range", {"query": "{" + match + "}", "limit": 1, "since": "1m"}
         try:
             result = get_json(profile[kind], path, params)
             expected = "vector" if kind == PROM else "streams"
@@ -183,7 +188,8 @@ def safe_log(line):
 def read_view(kind, profile, labels, start, end):
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     start_ms, end_ms = ((instant - epoch) // timedelta(milliseconds=1) for instant in (start, end))
-    query = metric_query(labels, end_ms - start_ms) if kind == PROM else "{" + labels + "}"
+    match = selector(labels)
+    query = metric_query(match, end_ms - start_ms) if kind == PROM else "{" + match + "}"
     view = {"source": kind, "query": query, "windowStart": start.isoformat(timespec="milliseconds"),
             "windowEnd": end.isoformat(timespec="milliseconds"), "samples": [], "truncated": False}
     try:
@@ -196,6 +202,8 @@ def read_view(kind, profile, labels, start, end):
                 name = row["metric"]["signal"]
                 if name not in {"min_up", "requests", "errors", "mean_seconds"}:
                     raise SourceError("指标信号无效")
+                if row["value"][0] != end_ms / 1000:
+                    raise SourceError("指标计算时间与查询窗口不符")
                 number = float(row["value"][1])
                 if not math.isfinite(number) or number < 0:
                     raise SourceError("指标样本数值无效")
@@ -211,6 +219,10 @@ def read_view(kind, profile, labels, start, end):
                 raise SourceError("日志结果类型无效")
             entries = []
             for stream in data["result"]:
+                stream_labels = stream["stream"]
+                if not isinstance(stream_labels, dict) or any(
+                        stream_labels.get(key) != value for key, value in labels.items()):
+                    raise SourceError("日志流的服务或环境标签与查询不符")
                 for stamp, line in stream["values"]:
                     ns = int(stamp)
                     if not (start_ms * 1000000 < ns <= end_ms * 1000000) or not isinstance(line, str):

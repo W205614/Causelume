@@ -213,12 +213,16 @@ receivers:
                          volumes=[roles],
                          healthcheck=db_health),
         "agent": agent,
+        "migrate": node(image=runtime, entrypoint=["java", "-jar", "/candidate.jar", "storage", "migrate-pg"],
+                        volumes=[bind(jar, "/candidate.jar")], secrets=["APP_MIGRATOR_PASSWORD"],
+                        environment={"APP_DB_URL":"jdbc:postgresql://postgres:5432/causelume"},
+                        depends_on={"postgres":{"condition":"service_healthy"}}),
         "app": node(image=runtime, entrypoint=["java", "-jar", "/candidate.jar"], volumes=[bind(jar, "/candidate.jar")],
-                    secrets=[k for k in keys if k not in ("POSTGRES_PASSWORD", "RESTIC_PASSWORD")] + ["MANAGEMENT_TOKEN"],
+                    secrets=[k for k in keys if k not in ("POSTGRES_PASSWORD", "RESTIC_PASSWORD", "APP_MIGRATOR_PASSWORD")] + ["MANAGEMENT_TOKEN"],
                     ports=["127.0.0.1::8080", "127.0.0.1::9091"],
-                    depends_on={"postgres":{"condition":"service_healthy"}},
+                    depends_on={"postgres":{"condition":"service_healthy"},"migrate":{"condition":"service_completed_successfully"}},
                     environment={"SPRING_PROFILES_ACTIVE":"prod", "APP_DB_URL":"jdbc:postgresql://postgres:5432/causelume",
-                                 "APP_DB_USER":"causelume_app", "AGENT_URL":"http://agent:8091", "AGENT_MODE":"offline",
+                                 "APP_DB_USER":"causelume_app", "SPRING_FLYWAY_ENABLED":"false", "AGENT_URL":"http://agent:8091", "AGENT_MODE":"offline",
                                  "MANAGEMENT_SERVER_PORT":"9091", "SPRING_MAIL_HOST":"mail", "SPRING_MAIL_PORT":"1025",
                                  "APP_SMTP_FROM":"candidate@example.invalid"}),
         "alertmanager": node(image=AM, volumes=[bind(alert, "/etc/alertmanager/alertmanager.yml")],
@@ -251,6 +255,32 @@ def main():
                "-f", str(OBS / "contract-compose.yml"), "-f", str(overlay)]
         def compose(*args):
             return subprocess.check_output([*cmd, *args], env=env, text=True, timeout=600).strip()
+        def assert_runtime_permissions(service):
+            # SQL executes with the real application role on both the fresh and restored databases.
+            sql = """
+                DO $checks$
+                DECLARE command text;
+                BEGIN
+                    UPDATE public.tickets SET title=title WHERE false;
+                    FOREACH command IN ARRAY ARRAY[
+                        'INSERT INTO public.flyway_schema_history DEFAULT VALUES',
+                        'UPDATE public.flyway_schema_history SET success=true WHERE false',
+                        'DELETE FROM public.flyway_schema_history WHERE false',
+                        'CREATE TABLE public.unexpected_ddl (id integer)'
+                    ] LOOP
+                        BEGIN
+                            EXECUTE command;
+                            RAISE EXCEPTION 'runtime unexpectedly allowed %', command;
+                        EXCEPTION WHEN insufficient_privilege THEN NULL;
+                        END;
+                    END LOOP;
+                END $checks$;
+            """
+            compose("exec", "-T", service, "sh", "-ec",
+                    'export PGPASSWORD="$(cat /run/secrets/APP_DB_PASSWORD)"; '
+                    'exec psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U causelume_app -d causelume -c "$1"',
+                    "check-privileges", sql)
+
         print(f"Candidate JAR SHA256 {hashlib.sha256(args.jar.read_bytes()).hexdigest()}", flush=True)
         try:
             compose("up", "-d")
@@ -259,6 +289,9 @@ def main():
                              "rolcreaterole,has_schema_privilege(rolname,'public','CREATE') "
                              "from pg_roles where rolname='causelume_app'")
             assert rights == "18|f|f|f|f", "unexpected PostgreSQL version or runtime privileges"
+            compose("exec", "-T", "app", "sh", "-ec", "test ! -e /run/secrets/APP_MIGRATOR_PASSWORD")
+            assert "Offline storage operation completed." in compose("logs", "migrate"), "dedicated migration did not complete"
+            assert_runtime_permissions("postgres")
             exercise(lambda service, port: "http://" + compose("port", service, str(port)), keys, env["CONTRACT_MANAGEMENT_TOKEN"])
             compose("up", "-d", "--wait", "restore-postgres")
             if not args.backup_image:
@@ -270,7 +303,9 @@ def main():
             compose(*run, "--entrypoint", "sh", "backup", "-ec",
                     "cmp /config/sources.json /restore/config/sources.json && "
                     "cmp /config/secrets/APP_MFA_KEY /restore/config/secrets/APP_MFA_KEY && "
+                    "test ! -e /work/causelume.dump && test ! -e /work/dump.sha256 && test ! -e /work/release.txt && "
                     "test -s /work/last-success && test \"$(cat /restore/work/release.txt)\" = candidate")
+            assert_runtime_permissions("restore-postgres")
             restored = compose("exec", "-T", "restore-postgres", "sh", "-ec",
                                'export PGPASSWORD="$(cat /run/secrets/APP_DB_PASSWORD)"; '
                                'exec psql -h 127.0.0.1 -U causelume_app -d causelume -Atc "$1"', "sh",

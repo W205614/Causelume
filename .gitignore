@@ -17,3 +17,4 @@ production.env
 
 heartbeat.env
 /deployment/observability/compose.site.yaml
+/compose.override.yaml

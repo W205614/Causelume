@@ -1,6 +1,14 @@
 # 账号与 PostgreSQL 迁移
 
-开发默认使用 H2；Spring profile `prod` 使用 PostgreSQL 18，所有登录账户必须绑定 TOTP。APP_DB_URL、APP_DB_USER、APP_DB_PASSWORD 供业务连接使用；Flyway 使用独立账号 `causelume_migrator` 和 APP_MIGRATOR_PASSWORD。新 PG 库从 V5 建表，两个数据库共用 V6 以后的迁移。已有 H2 保留原来 V1–V5 的校验和。生产 Spring 配置支持 `/run/secrets/` 下以属性名命名的文件。
+开发默认使用 H2；Spring profile `prod` 使用 PostgreSQL 18，所有登录账户必须绑定 TOTP。APP_DB_URL、APP_DB_USER、APP_DB_PASSWORD 供业务连接使用；Flyway 使用独立账号 `causelume_migrator` 和 APP_MIGRATOR_PASSWORD。新 PG 库从 V5 建表，两个数据库共用 V6 以后的迁移。已有 H2 保留原来 V1–V5 的校验和。生产 Spring 配置支持 `/run/secrets/` 下以属性名命名的文件。生产 Compose 先运行 `storage migrate-pg` 一次性任务，成功后才启动业务服务；业务服务关闭自动 Flyway 且不挂载迁移密码。
+
+## 独立部署迁移
+
+```sh
+java -jar causelume-1.0.0.jar storage migrate-pg
+```
+
+该命令只接收 PostgreSQL APP_DB_URL 和 APP_MIGRATOR_PASSWORD（或对应的受限文件），不启动Web、worker、邮件或账户初始化。成功后撤销业务角色对flyway_schema_history的INSERT/UPDATE/DELETE，保留只读访问。业务表的DML权限仍然保留。非Compose部署也应先执行此命令，再以业务凭据及 SPRING_FLYWAY_ENABLED=false 启动应用；只向迁移进程提供迁移凭据。H2本地演示仍由启动时Flyway增量迁移。
 
 ## 账号
 

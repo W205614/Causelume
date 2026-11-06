@@ -5,13 +5,13 @@ import re
 from datetime import datetime
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from flask import abort, request
 from werkzeug.exceptions import HTTPException as HttpProblem
 
 from common import application, authenticate, required, run
-from observability import DEMO, check_profile, interpret, load_sources, observe, target
+from observability import DEMO, EVENTS, check_profile, interpret, load_sources, observe, target
 
 
 class FixedEndpoint(HTTPRedirectHandler):
@@ -25,7 +25,7 @@ def read_json(url, token, body=None, timeout=3, limit=4096, headers=None):
     query = Request(url, data=payload, headers={
         "Authorization": f"Bearer {token}", "Content-Type": "application/json", **(headers or {})})
     try:
-        with build_opener(FixedEndpoint()).open(query, timeout=timeout) as response:
+        with build_opener(ProxyHandler({}), FixedEndpoint()).open(query, timeout=timeout) as response:
             data = response.read(limit + 1)
             if len(data) > limit:
                 abort(502, "内部服务响应超出大小限制")
@@ -71,6 +71,9 @@ def sample_checkout(url, token):
                 or not isinstance(row.get("event"), str) or not 0 < len(row["event"]) <= 128):
             abort(502, "快照缺少有效错误日志")
         snapshot["latestError"] = {key: row[key] for key in ("at", "id", "status", "event")}
+        row = snapshot["latestError"]
+        if row["event"] not in EVENTS:
+            row["event"] = "unclassified"
     elif row is not None:
         abort(502, "快照错误计数与日志不一致")
     if count == 0:

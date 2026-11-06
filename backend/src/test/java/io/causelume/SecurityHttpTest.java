@@ -38,6 +38,8 @@ class SecurityHttpTest {
     }
     @LocalServerPort int port;
     @Autowired Store store;
+    @Autowired Accounts accounts;
+    @Autowired Access access;
     final HttpClient http=HttpClient.newHttpClient();
     final ObjectMapper json=new ObjectMapper();
     HttpRequest.Builder route(String path) {
@@ -48,6 +50,21 @@ class SecurityHttpTest {
     }
     HttpRequest.Builder post(String path,Object body) {
         return route(path).POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)));
+    }
+    @Test @org.springframework.transaction.annotation.Transactional
+    void revokedAdminCannotCompleteAnAlreadyAdmittedAccountWrite() {
+        long id=store.insert("insert into accounts(username,password_hash,role) values ('race-admin','unused','ADMIN')");
+        var req=new org.springframework.mock.web.MockHttpServletRequest("POST","/api/users");
+        req.setContentType("application/json");
+        long version=store.db.queryForObject("select auth_version from accounts where id=?",Long.class,id);
+        req.getSession().setAttribute("actor",new Actor(id,"race-admin","ADMIN",null,false,false,version));
+        assertTrue(access.preHandle(req,new org.springframework.mock.web.MockHttpServletResponse(),accounts));
+        // Model a revocation committing after interceptor admission and before the handler obtains its locks.
+        store.db.update("update accounts set active=false,auth_version=auth_version+1 where id=?",id);
+        assertEquals(401,assertThrows(Problem.class,()->accounts.user(
+            new Accounts.Account("unauthorized","secret-password","ADMIN",null),req)).status);
+        assertEquals(401,assertThrows(Problem.class,()->accounts.reset(1,new Accounts.Reset("secret-password"),req)).status);
+        assertEquals(0L,store.db.queryForObject("select count(*) from accounts where username='unauthorized'",Long.class));
     }
     @Test void proxyCookieBodyLimitsAdmissionAndConcurrentRequests() throws Exception {
         var login=Map.of("username","admin","password","test-admin-secret");
@@ -92,11 +109,26 @@ class SecurityHttpTest {
             store.insert("insert into tasks(ticket_id,creator_id,request_id,status,started_at) values (?,1,random_uuid(),'RUNNING',current_timestamp)",id);
         assertEquals(429,send(post("tasks",Map.of("ticketId",fullTicket,"requestId",UUID.randomUUID())).header("Cookie",session).build()).statusCode());
 
+        var other=send(post("login",login).build());
+        String otherSession=other.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
+        assertEquals(200,send(post("account/profile",Map.of("email","test-oncall@example.test")).header("Cookie",session).build()).statusCode());
+        var me=send(route("me").header("Cookie",otherSession).GET().build());
+        assertEquals("test-oncall@example.test",json.readTree(me.body()).get("email").asString());
+        for(int i=0;i<5;i++){
+            assertEquals(403,send(post("account/mfa/enroll",Map.of("password","wrong")).header("Cookie",session).build()).statusCode());
+            assertEquals(403,send(post("account/password",Map.of("currentPassword","wrong","newPassword","new-secret-password"))
+                .header("Cookie",otherSession).build()).statusCode());
+        }
+        for(String sid:new String[]{session,otherSession})
+            assertEquals(429,send(post("account/mfa/enroll",Map.of("password","test-admin-secret")).header("Cookie",sid).build()).statusCode());
+        assertEquals(10L,store.db.queryForObject("select count(*) from audit where action='REAUTH_DENIED' and target_id=1",Long.class));
+        assertEquals(1L,store.db.queryForObject("select count(*) from audit where action='REAUTH_LIMITED' and target_id=1",Long.class));
+
         var badKnown=send(post("login",Map.of("username","admin","password","wrong")).build());
         var badUnknown=send(post("login",Map.of("username","missing","password","wrong")).build());
         assertEquals(401,badKnown.statusCode());
         assertEquals(badKnown.body(),badUnknown.body());
-        for(int i=0;i<7;i++) assertEquals(401,send(post("login",Map.of("username","missing","password","wrong")).build()).statusCode());
+        for(int i=0;i<6;i++) assertEquals(401,send(post("login",Map.of("username","missing","password","wrong")).build()).statusCode());
         assertEquals(429,send(post("login",login).header("X-Forwarded-For","203.0.113.12").build()).statusCode());
         assertEquals(1L,store.db.queryForObject("select count(*) from audit where action='LOGIN_LIMITED'",Long.class));
     }

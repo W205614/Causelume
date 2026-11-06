@@ -17,6 +17,7 @@ class Accounts {
     final BCryptPasswordEncoder encoder;
     final SecondFactor mfa;
     final LoginAttempts attempts;
+    final LoginAttempts passwordChecks=new LoginAttempts();
     final String dummyHash;
     Accounts(Store store, Environment env, BCryptPasswordEncoder encoder,LoginAttempts attempts,SecondFactor mfa) {
         this.store=store; this.env=env; this.encoder=encoder;
@@ -88,8 +89,7 @@ class Accounts {
     }
     @PostMapping("/users") @Transactional
     public Object user(@RequestBody Account input,HttpServletRequest req) {
-        Actor actor=Access.actor(req);
-        actor.admin();
+        Actor actor=adminWriter(req);
         long id=create(input.username,input.password,input.role);
         store.db.update("update accounts set email=? where id=?",email(input.email),id);
         store.audit(actor.username(),"CREATE_USER",id);
@@ -113,9 +113,31 @@ class Accounts {
         if (!(boolean)row.get("active") || actor.authVersion()!=(long)row.get("authVersion")) throw new Problem(401,"请重新登录");
         return row;
     }
+    private Actor adminWriter(HttpServletRequest req) {
+        var actor=Access.actor(req);
+        actor.admin();
+        // A concurrent revocation and a privileged account write must see the same ordering.
+        store.rows("select id from accounts where role='ADMIN' order by id for update");
+        own(req);
+        return actor;
+    }
+
+    static class PasswordDenied extends Problem {
+        PasswordDenied(int status,String message) { super(status,message); }
+    }
+
     private void verifyPassword(Map<String,Object> row,String supplied) {
-        if(supplied==null || supplied.getBytes(StandardCharsets.UTF_8).length>72 || !encoder.matches(supplied,(String)row.get("passwordHash")))
-            throw new Problem(403,"当前密码错误");
+        long id=(long)row.get("id");
+        String username=(String)row.get("username");
+        var decision=passwordChecks.check(Long.toString(id));
+        if(decision!=LoginAttempts.Decision.ALLOW) {
+            if(decision==LoginAttempts.Decision.FIRST_LIMIT) store.audit(username,"REAUTH_LIMITED",id);
+            throw new PasswordDenied(429,"密码验证请求过多，请在一分钟后重试");
+        }
+        if(supplied==null || supplied.getBytes(StandardCharsets.UTF_8).length>72 || !encoder.matches(supplied,(String)row.get("passwordHash"))) {
+            store.audit(username,"REAUTH_DENIED",id);
+            throw new PasswordDenied(403,"当前密码错误");
+        }
     }
     private String email(String value) {
         if(value==null || value.isBlank()) return null;
@@ -137,7 +159,7 @@ class Accounts {
         return actor;
     }
 
-    @PostMapping("/account/password") @Transactional
+    @PostMapping("/account/password") @Transactional(noRollbackFor=PasswordDenied.class)
     public Object changePassword(@RequestBody Password input,HttpServletRequest req) {
         var row=own(req);
         verifyPassword(row,input.currentPassword);
@@ -149,8 +171,7 @@ class Accounts {
     }
     @PostMapping("/users/{id}/password") @Transactional
     public Object reset(@PathVariable long id,@RequestBody Reset input,HttpServletRequest req) {
-        var actor=Access.actor(req);
-        actor.admin();
+        var actor=adminWriter(req);
         validatePassword(input.newPassword);
         if(store.db.update("update accounts set password_hash=?,auth_version=auth_version+1 where id=?",encoder.encode(input.newPassword),id)==0)
             throw new Problem(404,"账户不存在");
@@ -159,12 +180,8 @@ class Accounts {
     }
     @PostMapping("/users/{id}/status") @Transactional
     public Object status(@PathVariable long id,@RequestBody Status input,HttpServletRequest req) {
-        var actor=Access.actor(req);
-        actor.admin();
+        var actor=adminWriter(req);
         if(input.active==null) throw new Problem(400,"需要 active");
-        // Serialize admin deactivations in a consistent order, then count live administrators.
-        store.rows("select id from accounts where role='ADMIN' order by id for update");
-        own(req);
         var target=store.one("select role,active from accounts where id=? for update",id);
         if(input.active.equals(target.get("active"))) return Map.of("ok",true);
         if(!input.active && "ADMIN".equals(target.get("role")) &&
@@ -175,7 +192,7 @@ class Accounts {
         return Map.of("ok",true);
     }
 
-    @PostMapping("/account/mfa/enroll") @Transactional
+    @PostMapping("/account/mfa/enroll") @Transactional(noRollbackFor=PasswordDenied.class)
     public Object enroll(@RequestBody Enroll input,HttpServletRequest req) {
         var row=own(req);
         verifyPassword(row,input.password);

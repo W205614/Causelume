@@ -15,6 +15,7 @@ done
 compose config --quiet
 available="$(df -Pk . | awk 'NR==2 {print $4}')"
 test "$available" -ge 5242880 || { printf '%s\n' 'At least 5 GiB of free disk required before update' >&2; exit 1; }
+compose --profile maintenance --profile restore build backup restore-check
 pg_volume="$(compose config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["volumes"]["postgres"]["name"])')"
 existing="$(docker volume ls --format '{{.Name}}' --filter "name=^${pg_volume}$")"
 running="$(compose ps --status running -q postgres)"
@@ -34,7 +35,11 @@ if [ -n "$existing" ]; then
       *) old_image="$(docker inspect --format '{{.Image}}' "$old_app")" ;;
     esac
   fi
-  compose --profile maintenance run --rm --no-deps -e "APP_RELEASE=pre-upgrade:$old_image" backup
+  compose stop app
+  if ! compose --profile maintenance run --rm --no-deps -e "APP_RELEASE=pre-upgrade:$old_image" backup; then
+    printf '%s\n' 'Backup failed. No migration was started; the application remains stopped for operator review.' >&2
+    exit 1
+  fi
 elif [ -n "$running" ]; then
   printf '%s\n' 'Running PostgreSQL found without the expected named volume; inspect its data mount before upgrading.' >&2
   exit 1

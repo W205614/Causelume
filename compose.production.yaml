@@ -34,6 +34,21 @@ services:
       timeout: 3s
       retries: 20
 
+  migrate:
+    image: ${APP_IMAGE:?set the tested release image digest}
+    command: ["storage", "migrate-pg"]
+    environment:
+      APP_DB_URL: jdbc:postgresql://postgres:5432/causelume
+    secrets: [APP_MIGRATOR_PASSWORD]
+    networks: [database]
+    depends_on:
+      postgres: {condition: service_healthy}
+    mem_limit: 512m
+    restart: "no"
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
   app:
     <<: *runtime
     image: ${APP_IMAGE:?set the tested release image digest}
@@ -42,7 +57,7 @@ services:
       SPRING_CONFIG_IMPORT: optional:configtree:/run/secrets/
       APP_DB_URL: jdbc:postgresql://postgres:5432/causelume
       APP_DB_USER: causelume_app
-      SPRING_FLYWAY_USER: causelume_migrator
+      SPRING_FLYWAY_ENABLED: "false"
       APP_PUBLIC_ORIGIN: https://${APP_DOMAIN:?required}
       AGENT_URL: http://agent:8091
       AGENT_MODE: ${AGENT_MODE:-offline}
@@ -61,11 +76,12 @@ services:
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_TIMEOUT: "5000"
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_WRITETIMEOUT: "5000"
       APP_SMTP_FROM: ${SMTP_FROM:?required}
-    secrets: [APP_DB_PASSWORD, APP_MIGRATOR_PASSWORD, APP_ADMIN_PASSWORD, APP_OPERATOR_PASSWORD, APP_MFA_KEY, AGENT_TOKEN, MANAGEMENT_TOKEN, ALERTMANAGER_TOKEN, spring.mail.password]
+    secrets: [APP_DB_PASSWORD, APP_ADMIN_PASSWORD, APP_OPERATOR_PASSWORD, APP_MFA_KEY, AGENT_TOKEN, MANAGEMENT_TOKEN, ALERTMANAGER_TOKEN, spring.mail.password]
     volumes: [logs:/var/log/causelume]
     networks: [edge, database, backend, telemetry]
     depends_on:
       postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
       initlogs: {condition: service_completed_successfully}
       agent: {condition: service_healthy}
     mem_limit: 768m

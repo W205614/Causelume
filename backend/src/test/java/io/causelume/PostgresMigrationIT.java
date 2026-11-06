@@ -43,6 +43,8 @@ class PostgresMigrationIT {
         assertEquals("反馈",db.queryForObject("select feedback from tasks where id=1",String.class));
         assertEquals("旧记录",db.queryForObject("select note from timeline where id=1",String.class));
         assertEquals(27,db.queryForObject("insert into tickets(service_id,title,status,creator_id,request_id) values(1,'new','OPEN',1,?) returning id",Long.class,UUID.randomUUID()));
+        for(String mutation : java.util.List.of("INSERT","UPDATE","DELETE"))
+            assertFalse(db.queryForObject("select has_table_privilege(current_user,'public.flyway_schema_history',?)",Boolean.class,mutation));
         assertFalse(db.queryForObject("select has_schema_privilege(current_user,'public','CREATE')",Boolean.class));
         try(var connection=runtime.getConnection()) { OfflineStorage.recoverAdmin(connection,"admin","changed-by-local-cli"); }
         assertTrue(new BCryptPasswordEncoder().matches("changed-by-local-cli",db.queryForObject("select password_hash from accounts where id=1",String.class)));
