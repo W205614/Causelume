@@ -122,7 +122,7 @@ python scripts/e2e.py --env-file .env --expect-mode offline
 
 本地体验之后，可按需部署到 Linux 单机，使用 PostgreSQL 18、TOTP、邮件通知、Prometheus/Alertmanager/Loki/Alloy、Caddy HTTPS 和加密备份。准备主机、域名及服务账户后，按下表填写配置。凭据存放在受限文件中。
 
-完整步骤见 [Linux 接入手册](docs/production-setup.md)，发布镜像与摘要从 [Release 工作流](https://github.com/W205614/Causelume/actions/workflows/release.yml) 获取。
+完整步骤见 [Linux 接入手册](docs/production-setup.md)。源码版本从 [GitHub Releases](https://github.com/W205614/Causelume/releases) 获取；镜像按需通过 [手动镜像工作流](https://github.com/W205614/Causelume/actions/workflows/release.yml) 单独发布。
 
 <details>
 <summary>查看外部服务配置与发布命令</summary>
@@ -146,7 +146,7 @@ python scripts/init_production.py
 
 编辑 production.env 和 secrets/ 外部凭据文件。保管 APP_MFA_KEY 与 restic 恢复密码的独立恢复副本。生产账户的首次绑定及恢复见 [账户与数据迁移](backend/STORAGE.md)。
 
-发布工作流支持手动触发或 v* 标签。下载 release-manifest，将已验证的 app/agent 镜像摘要填入 APP_IMAGE、AGENT_IMAGE，APP_RELEASE 填提交号。发布前查看安全扫描结果，运行：
+创建版本 Tag 或 GitHub Release 不会发布镜像或部署服务。需要 GHCR 镜像时，由维护者确认包可见性、费用和目标提交后手动触发镜像工作流。下载该次运行的 release-manifest，将已验证的 app/agent 镜像摘要填入 APP_IMAGE、AGENT_IMAGE，APP_RELEASE 填提交号。发布前查看安全扫描结果，运行：
 
 ~~~sh
 docker compose --env-file production.env -f compose.production.yaml -f compose.observability.yaml config --quiet
@@ -249,3 +249,7 @@ python scripts/verify_candidate.py
 - **如何反馈问题？** 提供提交号或镜像摘要、复现步骤和脱敏日志。配置排查见 [安全说明](backend/SECURITY.md) 和 [运维手册](docs/operations.md)。
 
 更多配置、接口和操作说明见 [文档导航](docs/README.md)。参与开发见 [贡献指南](CONTRIBUTING.md)，安全问题通过 [私密报告流程](SECURITY.md) 反馈。
+
+## 许可证
+
+本项目自有代码和素材采用 [MIT 许可证](LICENSE)，Copyright (c) 2026 W205614。第三方依赖和独立运行的外部组件保留各自许可证，详见 [第三方说明](THIRD_PARTY_NOTICES.md)。

@@ -14,10 +14,11 @@
 | 调用业务接口 | [API 契约](../backend/API.md) |
 | 检查认证、Origin、配额和故障处理 | [安全说明](../backend/SECURITY.md) |
 | 开发或验证控制台 | [前端说明](../frontend/README.md) |
+| 核对首个源码版本的检查范围、修复与限制 | [v1.0.0 发布检查](release-1.0.0.md) |
 | 核对本轮小团队加固、升级与清理结果 | [小团队交付记录](team-release-2026-11-06.md) |
 | 查阅个人版集成测试和外部接入计划 | [个人版验证记录](personal-release.md) |
 | 核对源码、容器版本与本轮文档审查 | [状态核验 · 2026-11-06](status-2026-11-06.md) |
 
 项目建设和各阶段部署按版本记录在 [实施记录](implementation.md)、[早期验收](verification.md) 和 [增量审查](review-2026-11-06.md)。每份记录列出对应的提交、环境和结果。
 
-发布时使用通过验证的提交及 [发布清单](https://github.com/W205614/Causelume/actions/workflows/release.yml) 中的不可变镜像摘要，部署后记录实际运行版本。
+源码版本见 [GitHub Releases](https://github.com/W205614/Causelume/releases)。源码 Tag 不自动推送镜像；需要镜像部署时，另行确认发布范围，使用通过验证的提交及 [手动镜像工作流](https://github.com/W205614/Causelume/actions/workflows/release.yml) 清单中的不可变摘要，部署后记录实际运行版本。

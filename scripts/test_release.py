@@ -52,6 +52,8 @@ class ReleaseContract(unittest.TestCase):
                 (work / "secrets" / name).write_text("fixture")
             (work / "production.env").write_text("FIXTURE=1")
             (work / "heartbeat.env").touch()
+            # Keep the Windows host ACL when the Linux fixture appends its calls.
+            (work / "calls.jsonl").touch()
             if site:
                 (work / SITE).parent.mkdir(parents=True)
                 (work / SITE).touch()

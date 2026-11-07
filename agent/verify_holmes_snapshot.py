@@ -71,8 +71,10 @@ def verify():
                     with urlopen(base + "/healthz", timeout=1):
                         break
                 except URLError:
-                    if process.poll() is not None or time.monotonic() >= deadline:
-                        raise
+                    if process.poll() is not None:
+                        raise RuntimeError(f"Holmes exited during startup: {process.returncode}") from None
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("Holmes /healthz did not become ready within 50 seconds") from None
                     time.sleep(0.3)
 
             info_req = Request(base + "/api/info?detail=full", headers={"Authorization": "Bearer contract-only"})

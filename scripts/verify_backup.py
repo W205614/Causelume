@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import re
 import subprocess
 import tempfile
 import time
@@ -29,6 +30,14 @@ def main():
         run("docker","exec","-i",name,"psql","-U","postgres","-v","ON_ERROR_STOP=1",input=sql.encode(),stdout=subprocess.DEVNULL)
         with tempfile.TemporaryDirectory(prefix="causelume-restore-") as folder:
             path=Path(folder)
+            if os.name == "nt":
+                # Docker-created files need an explicit host ACE, not OWNER RIGHTS.
+                account=subprocess.check_output(["whoami","/user","/fo","csv","/nh"])
+                identity=re.search(rb"S-1-\d+(?:-\d+)+",account)
+                if not identity:
+                    raise RuntimeError("Could not determine the current Windows user SID")
+                run("icacls",str(path),"/grant","*"+identity.group().decode("ascii")+":(OI)(CI)F",
+                    stdout=subprocess.DEVNULL)
             (path/"password").write_text(secrets.token_urlsafe(32),encoding="utf-8")
             dump=run("docker","exec",name,"pg_dump","-U","postgres","-Fc","postgres",capture_output=True).stdout
             (path/"database.dump").write_bytes(dump)

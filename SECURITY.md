@@ -1,5 +1,7 @@
 # 安全报告
 
+安全修复针对最新发布版本及 `main` 分支评估；旧版本请先升级或提供可在当前版本复现的步骤。项目没有独立的长期支持版本。
+
 本仓库已启用 GitHub 私密漏洞报告。发现认证、权限、数据访问或其他安全问题时，请使用 [Report a vulnerability](https://github.com/W205614/Causelume/security/advisories/new) 提交，便于私下复现和协作修复。
 
 报告请包含：
