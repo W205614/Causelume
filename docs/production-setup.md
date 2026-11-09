@@ -7,7 +7,7 @@
 1. 安装维护中的 Linux、Docker Engine 和 Compose v2，启用主机时间同步。工作目录设为 /opt/causelume。
 2. 防火墙只向外开放 SSH（限制来源）及 80/443。PostgreSQL、Agent、Holmes、Prometheus、Loki、Alertmanager 与管理指标端口通过内部网络访问。
 3. 拉取审核过的提交，复制 production.env.example 为 production.env。以专用部署用户运行 `python scripts/init_production.py`。Linux 上 `secrets/` 权限为 0700，其他宿主用户无法遍历。内部凭据文件权限为 0444，Compose 按服务授权单独只读挂载，使容器中不同 UID 能读取所需文件。备份服务另有整个目录的归档权限。将该目录置于部署用户控制、未公开共享的路径下。
-4. 镜像工作流仅支持手动触发；创建源码 Tag 或 Release 不会推送镜像。维护者确认目标提交、包可见性和费用后单独发布，再从该次运行的 release-manifest 填写 APP_IMAGE、AGENT_IMAGE 和 APP_RELEASE。GHCR 包如果设为私有，服务器需先通过 `docker login ghcr.io` 使用具有 read:packages 权限的凭据登录；用标准输入传入令牌，勿写入命令历史。若需要匿名拉取，由包所有者在 GitHub 的包设置中公开该包。镜像摘要必须对应已通过检查的候选提交。
+4. 镜像工作流仅支持手动触发；创建源码 Tag 或 Release 不会推送镜像。第一次将 `candidate_run_id` 留空，构建、扫描、离线闭环并收集精确对应源码，输出七天保留的 `release-candidate` 制品，尚不推送镜像。维护者下载校验候选并完成所需真实接入验收后，对同一提交再次触发，填写首次成功运行的 ID；工作流加载原镜像、核对摘要与提交再推送，不重新构建。将候选中的第三方源码 ZIP 和校验值随对应 Release 发布，再从第二次运行的 `release-manifest` 填写 APP_IMAGE、AGENT_IMAGE 和 APP_RELEASE。包名为 `ghcr.io/w205614/causelume-app` 和 `ghcr.io/w205614/causelume-agent`，以完整提交号为标签；不覆盖同标签的不同内容。GHCR 包如果设为私有，服务器需先通过 `docker login ghcr.io` 使用具有 read:packages 权限的凭据登录；用标准输入传入令牌，勿写入命令历史。若需要匿名拉取，由包所有者在 GitHub 的包设置中公开该包。镜像摘要必须对应已通过检查的候选提交。
 5. 编辑外部凭据及域名，先运行 Compose config --quiet，再使用 sh scripts/release.sh。部署依赖的角色、数据库和内部网络由配置创建。
 
 ~~~sh

@@ -93,6 +93,10 @@ class PostgresAccountsIT {
         assertEquals("FAILED",store.one("select status from tasks where id=?",taskId).get("status"));
         call(admin,"services/1",Map.of("name","checkout","description","retired fixture","resource","http",
             "environment","test","active",false,"version",0),200);
+        assertEquals(alertId,call(admin,"alerts",alert,200).get("id").asLong());
+        var newAlert=new HashMap<String,Object>(alert);
+        newAlert.put("externalId","new-event-after-retirement");
+        call(admin,"alerts",newAlert,409);
         assertEquals(ticketId,call(admin,"tickets",ticket,200).get("id").asLong());
         call(admin,"tickets",Map.of("serviceId",1,"title","changed payload","requestId",ticket.get("requestId")),409);
         call(admin,"tickets",Map.of("serviceId",1,"title","new request","requestId",UUID.randomUUID()),409);

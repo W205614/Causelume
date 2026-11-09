@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -49,21 +48,19 @@ class Monitoring {
     @PostMapping("/alerts") @Transactional
     public Object alert(@RequestBody Alert input,HttpServletRequest req) {
         var service=store.one("select active from services where id=? for update",input.serviceId);
-        if(!Boolean.TRUE.equals(service.get("active"))) throw new Problem(409,"服务已停用");
         String source=Problem.text(input.source,100,"source");
         if(source.startsWith("am/")) throw new Problem(400,"该来源前缀保留给机器入口");
         String externalId=Problem.text(input.externalId,200,"externalId");
         String severity=Problem.choice(input.severity,Set.of("CRITICAL","WARNING","INFO"),"severity");
         String title=Problem.text(input.title,200,"title");
         if(input.occurredAt==null) throw new Problem(400,"需要 occurredAt");
-        try {
-            long id=store.insertIdempotent("insert into alerts(service_id,source,external_id,severity,title,occurred_at) values (?,?,?,?,?,?)",
-                input.serviceId,source,externalId,severity,title,input.occurredAt);
-            store.audit(Access.actor(req).username(),"CREATE_ALERT",id);
-            return store.one("select * from alerts where id=?",id);
-        } catch (DuplicateKeyException existing) {
-            // The upstream event identity is immutable. Re-deliveries return the first observation.
-            return store.one("select * from alerts where service_id=? and source=? and external_id=?",input.serviceId,source,externalId);
-        }
+        // The service lock serializes event identities, including deliveries after retirement.
+        var existing=store.rows("select * from alerts where service_id=? and source=? and external_id=?",input.serviceId,source,externalId);
+        if(!existing.isEmpty()) return existing.getFirst();
+        if(!Boolean.TRUE.equals(service.get("active"))) throw new Problem(409,"服务已停用");
+        long id=store.insert("insert into alerts(service_id,source,external_id,severity,title,occurred_at) values (?,?,?,?,?,?)",
+            input.serviceId,source,externalId,severity,title,input.occurredAt);
+        store.audit(Access.actor(req).username(),"CREATE_ALERT",id);
+        return store.one("select * from alerts where id=?",id);
     }
 }

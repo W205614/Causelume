@@ -1,19 +1,50 @@
-name: Publish candidate images
+name: Prepare or publish candidate images
 on:
   workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: "Validated candidate run to publish; leave empty to build without pushing"
+        required: false
+        type: string
 permissions:
   contents: read
+  actions: read
   packages: write
+concurrency:
+  group: causelume-images-${{ github.sha }}
+  cancel-in-progress: false
 jobs:
   images:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
       - name: Build release images
+        if: inputs.candidate_run_id == ''
         run: |
-          docker build --label org.opencontainers.image.revision=$GITHUB_SHA -t ghcr.io/w205614/causelume-app:${GITHUB_SHA} .
-          docker build --label org.opencontainers.image.revision=$GITHUB_SHA -t ghcr.io/w205614/causelume-agent:${GITHUB_SHA} agent
+          version=$(python -c 'import json; print(json.load(open("frontend/package.json"))["version"])')
+          docker build --label org.opencontainers.image.revision=$GITHUB_SHA --label org.opencontainers.image.version=$version -t ghcr.io/w205614/causelume-app:${GITHUB_SHA} .
+          docker build -f agent/Dockerfile --label org.opencontainers.image.revision=$GITHUB_SHA --label org.opencontainers.image.version=$version -t ghcr.io/w205614/causelume-agent:${GITHUB_SHA} .
+      - name: Exercise the exact images before publishing
+        if: inputs.candidate_run_id == ''
+        run: |
+          python scripts/init_env.py
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          prefix = 'ghcr.io/w205614/causelume-'
+          Path('/tmp/release-images.json').write_text(json.dumps({'services': {
+            'app': {'image': prefix + 'app:' + os.environ['GITHUB_SHA']},
+            'agent': {'image': prefix + 'agent:' + os.environ['GITHUB_SHA']},
+            'checkout': {'image': prefix + 'agent:' + os.environ['GITHUB_SHA']}}}))
+          PY
+          docker compose -p causelume-release -f compose.yaml -f /tmp/release-images.json up -d --no-build --wait --wait-timeout 180 app agent checkout
+          python scripts/e2e.py --env-file .env
       - name: Scan application images
+        if: inputs.candidate_run_id == ''
         run: |
           docker save ghcr.io/w205614/causelume-app:${GITHUB_SHA} -o /tmp/app.tar
           docker save ghcr.io/w205614/causelume-agent:${GITHUB_SHA} -o /tmp/agent.tar
@@ -22,17 +53,96 @@ jobs:
             docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v /tmp:/scan:ro aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}.tar --exit-code 1 --severity HIGH,CRITICAL || failed=1
           done
           exit "$failed"
+      - name: Collect corresponding sources and candidate checksums
+        if: inputs.candidate_run_id == ''
+        run: |
+          version=$(python -c 'import json; print(json.load(open("frontend/package.json"))["version"])')
+          python scripts/collect_image_sources.py --app ghcr.io/w205614/causelume-app:${GITHUB_SHA} --agent ghcr.io/w205614/causelume-agent:${GITHUB_SHA} --version "$version" --output /tmp/sources
+          cp /tmp/sources/manifest.json /tmp/source-manifest.json
+          printf '%s\n' "$GITHUB_SHA" > /tmp/commit.txt
+          cd /tmp
+          sha256sum app.tar agent.tar source-manifest.json commit.txt causelume-v*-third-party-sources.zip > candidate-SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: inputs.candidate_run_id == ''
+        with:
+          name: release-candidate
+          retention-days: 7
+          path: |
+            /tmp/app.tar
+            /tmp/agent.tar
+            /tmp/source-manifest.json
+            /tmp/commit.txt
+            /tmp/candidate-SHA256SUMS
+            /tmp/causelume-v*-third-party-sources.zip
+      - name: Validate the candidate run
+        if: inputs.candidate_run_id != ''
+        env:
+          CANDIDATE_RUN: ${{ inputs.candidate_run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          run_id = os.environ['CANDIDATE_RUN']
+          assert run_id.isdecimal(), 'candidate_run_id must be numeric'
+          request = urllib.request.Request('https://api.github.com/repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + run_id,
+              headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'User-Agent': 'Causelume-release'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              run = json.load(response)
+          assert run['conclusion'] == 'success' and run['head_sha'] == os.environ['GITHUB_SHA'], 'Candidate did not pass for this commit'
+          assert run['path'] == '.github/workflows/release.yml' and run['event'] == 'workflow_dispatch', 'Unexpected candidate workflow'
+          PY
+      - uses: actions/download-artifact@v4
+        if: inputs.candidate_run_id != ''
+        with:
+          name: release-candidate
+          path: candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.candidate_run_id }}
+      - name: Verify and load the validated candidate
+        if: inputs.candidate_run_id != ''
+        run: |
+          cd candidate
+          sha256sum -c candidate-SHA256SUMS
+          test "$(cat commit.txt)" = "$GITHUB_SHA"
+          docker load -i app.tar
+          docker load -i agent.tar
+          for image in app agent; do
+            test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' ghcr.io/w205614/causelume-${image}:${GITHUB_SHA})" = "$GITHUB_SHA"
+          done
+          python - <<'PY'
+          import json, os, subprocess
+          manifest = json.load(open('source-manifest.json'))
+          for name, expected in manifest['images'].items():
+              actual = subprocess.check_output(['docker', 'image', 'inspect', '--format', '{{.Id}}', 'ghcr.io/w205614/causelume-' + name + ':' + os.environ['GITHUB_SHA']], text=True).strip()
+              assert actual == expected, name
+          PY
       - name: Push and record immutable references
+        if: inputs.candidate_run_id != ''
         env:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker push ghcr.io/w205614/causelume-app:${GITHUB_SHA}
-          docker push ghcr.io/w205614/causelume-agent:${GITHUB_SHA}
+          for image in app agent; do
+            target=ghcr.io/w205614/causelume-${image}:${GITHUB_SHA}
+            if docker manifest inspect "$target" > /tmp/existing.json 2> /tmp/manifest-error; then
+              actual=$(python -c 'import json; print(json.load(open("/tmp/existing.json"))["config"]["digest"])')
+              test "$actual" = "$(docker image inspect --format '{{.Id}}' "$target")" || { echo 'Refusing to replace an existing different image'; exit 1; }
+              docker pull "$target"
+            elif grep -Eiq 'manifest unknown|no such manifest|name unknown' /tmp/manifest-error; then
+              docker push "$target"
+            else
+              cat /tmp/manifest-error >&2
+              exit 1
+            fi
+          done
           docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/w205614/causelume-app:${GITHUB_SHA} > app-image.txt
           docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/w205614/causelume-agent:${GITHUB_SHA} > agent-image.txt
           printf '%s\n' "$GITHUB_SHA" > commit.txt
+      - name: Stop the disposable acceptance stack
+        if: always() && inputs.candidate_run_id == ''
+        run: docker compose -p causelume-release -f compose.yaml -f /tmp/release-images.json down --volumes
       - uses: actions/upload-artifact@v4
+        if: inputs.candidate_run_id != ''
         with:
           name: release-manifest
           path: |

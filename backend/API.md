@@ -17,7 +17,7 @@ Web 页面和 /api 同源。POST 使用 application/json，登录成功后由容
 | POST /api/tickets/{id}/actions | action、version、note，ASSIGN 还需 assigneeId，返回更新后的详情 |
 | GET /api/audit | 管理员查看关键业务操作，含 actor、action、targetId、createdAt |
 
-- 告警等级取 INFO、WARNING、CRITICAL。对同一服务、来源、外部事件 ID 的重投保留首条告警。
+- 告警等级取 INFO、WARNING、CRITICAL。对同一服务、来源、外部事件 ID 的重投保留首条告警，包括服务后来停用的情况；停用服务仍不允许接收新事件。
 - 每条工单同时表示待调查事件和它的协作记录。一个告警至多关联一个工单。同一操作者的 requestId 重投返回已有工单，包括其服务后来停用的情况；请求内容冲突返回 409。停用服务仍不允许创建新工单。
 - OPEN → ASSIGNED → PROCESSING → VERIFIED → CLOSED 依次使用 ASSIGN、START、VERIFY、CLOSE。管理员可在 ASSIGNED 状态改派。VERIFY 的 note 记录人工恢复验证，CLOSE 的 note 存为复盘。未关闭时可用 NOTE 追加观察。
 - 每次操作同时比较并递增 version，状态、审计和时间线在同一事务提交。并发写入返回 409 后需重新读取并审阅新记录。

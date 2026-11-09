@@ -3,7 +3,7 @@ WORKDIR /src
 COPY backend/pom.xml backend/pom.xml
 COPY frontend/public frontend/public
 COPY backend/src/main backend/src/main
-RUN --mount=type=cache,target=/root/.m2 mvn -q -f backend/pom.xml -Dmaven.test.skip=true package
+RUN --mount=type=cache,target=/root/.m2 mvn -q -f backend/pom.xml -Dmaven.test.skip=true package dependency:list -DincludeScope=runtime -DoutputFile=/src/runtime-dependencies.txt
 
 FROM eclipse-temurin:21-jre-jammy@sha256:1eac8b8fee11ca7d6725a48bc5d41992ed1561504ebae25490d2d062847e8269
 # Ubuntu's fixed APT build closes CVE-2026-109518; secure the update transport too.
@@ -13,7 +13,10 @@ RUN sed -i 's|http://archive.ubuntu.com|https://archive.ubuntu.com|g; s|http://s
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 RUN groupadd --system causelume && useradd --system --gid causelume causelume && mkdir /app/data && chown causelume:causelume /app/data
-COPY --from=build /src/backend/target/causelume-1.0.1.jar /app/server.jar
+COPY --from=build /src/backend/target/causelume-1.0.2.jar /app/server.jar
+COPY LICENSE THIRD_PARTY_NOTICES.md deployment/licenses/SOURCES.md /usr/share/causelume/licenses/
+COPY --from=build /src/runtime-dependencies.txt /usr/share/causelume/licenses/java-dependencies.txt
+RUN dpkg-query -W > /usr/share/causelume/licenses/ubuntu-packages.txt
 LABEL org.opencontainers.image.source="https://github.com/W205614/Causelume"
 USER causelume
 EXPOSE 8080

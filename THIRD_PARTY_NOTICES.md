@@ -29,7 +29,7 @@
 | Jakarta Activation 2.1.4、Angus Activation 2.0.3 | EDL-1.0 |
 | H2 2.4.240 | [MPL-2.0 或 EPL-1.0](https://github.com/h2database/h2database/blob/version-2.4.240/LICENSE.txt)，按上游双许可选择 |
 
-这些库通过 Maven 引用，未修改其源代码。本次仅发布项目源码；以后分发 JAR 或镜像时，应继续保留上游许可与 NOTICE，并按所选许可证满足相应源码提供等要求。镜像的操作系统和 JRE 还包含各自的第三方组件，不能仅用应用依赖清单代替整张镜像的许可说明。
+这些库通过 Maven 引用，未修改其源代码。镜像保留嵌套 JAR 的原许可与 NOTICE；本项目分发 Logback 时选择 EPL-2.0、H2 选择 MPL-2.0、Jakarta Annotation/Mail 与 Angus Mail 选择 EPL-2.0，原包中按文件适用的 EDL 声明继续保留。对应版本源 JAR 随镜像版本的第三方源码附件提供。
 
 ## Python 与前端测试依赖
 
@@ -39,7 +39,7 @@ Agent 使用 Flask 3.1.3（BSD-3-Clause）及 waitress 3.0.2（ZPL-2.1）。Flas
 
 ## 独立运行的服务和构建工具
 
-Compose 引用上游镜像，源码附件不包含这些镜像。本次没有向 GHCR 发布应用镜像。
+Compose 引用的独立上游服务镜像不包含在源码附件中，也不由本项目重新发布。应用 app 与 agent 镜像的分发材料见下一节。
 
 | 组件 | 上游许可 |
 |---|---|
@@ -53,3 +53,11 @@ Compose 引用上游镜像，源码附件不包含这些镜像。本次没有向
 | Python、Maven、Eclipse Temurin、Alpine/Ubuntu 基础镜像 | 按各发行版、运行时及所含软件包许可证使用 |
 
 对这些独立组件进行修改、重新打包或转售时，应重新核对对应版本的源码与分发义务，尤其是 Loki 的 AGPL 条款。本文件记录当前依赖与发布边界，不将独立服务重新授权为 MIT。
+
+## 应用镜像分发
+
+app 基于固定摘要的 Eclipse Temurin 21 JRE / Ubuntu Jammy，agent 基于固定摘要的 CPython 3.13 / Alpine 3.24。镜像随附本项目 LICENSE、本说明及 [对应源码说明](deployment/licenses/SOURCES.md)，位于 `/usr/share/causelume/licenses/`；保留 Temurin legal、Ubuntu copyright、CPython LICENSE 和 Python dist-info 许可证。
+
+镜像版本对应的 Release 同时提供 `causelume-v<版本>-third-party-sources.zip`，包括实际运行版本的 Ubuntu 原源码与发行版补丁、Alpine 精确 commit 的构建配方/补丁及校验后的上游源码、Temurin 和 CPython 源码及应用依赖源包。`manifest.json` 记录镜像 ID、实际组件版本、下载来源与文件摘要；Release 的 SHA256SUMS 校验附件。原始许可、版权与构建脚本随对应源包保留。该附件由 `scripts/collect_image_sources.py` 从最终候选镜像采集；精确源版本缺失或摘要不符会阻止镜像发布，不用新版本源码替代旧二进制对应源码。
+
+Maven、pip 和前端 Playwright 仅用于构建/测试，不进入应用运行镜像。Holmes、PostgreSQL、Prometheus/Loki 等独立服务继续由 Compose 拉取原始上游镜像，其发行与许可不由本项目 MIT 重新授权。

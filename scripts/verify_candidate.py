@@ -187,7 +187,7 @@ receivers:
         agent.update(image=agent_runtime, entrypoint=["python", "/candidate/investigator.py"])
         agent["volumes"].append(bind(ROOT / "agent", "/candidate"))
     else:
-        agent["build"] = {"context": str(ROOT / "agent")}
+        agent["build"] = {"context": str(ROOT), "dockerfile": "agent/Dockerfile"}
     dbkeys = ["POSTGRES_PASSWORD", "APP_DB_PASSWORD", "APP_MIGRATOR_PASSWORD"]
     db_environment = {"POSTGRES_DB": "causelume", "POSTGRES_USER": "causelume_owner",
                       "POSTGRES_PASSWORD_FILE": "/run/secrets/POSTGRES_PASSWORD"}
@@ -233,7 +233,7 @@ receivers:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--jar", type=Path, default=ROOT / "backend/target/causelume-1.0.1.jar")
+    parser.add_argument("--jar", type=Path, default=ROOT / "backend/target/causelume-1.0.2.jar")
     parser.add_argument("--runtime-image", default=RUNTIME, help="Java 21 runtime image. The mounted JAR supplies the application.")
     parser.add_argument("--agent-runtime", help="existing Python image with agent requirements; mount current source code")
     parser.add_argument("--backup-image", help="prebuilt image from deployment/backup; defaults to building the source")

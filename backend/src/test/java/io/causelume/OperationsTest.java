@@ -27,6 +27,33 @@ class OperationsTest {
     }
     int post(String path,Object data) throws Exception { return request(path,data).statusCode(); }
 
+    @Test void alertReplaySurvivesServiceDeactivation() throws Exception {
+        assertEquals(200,post("login",Map.of("username","admin","password","test-admin-secret")));
+        long serviceId=json.readTree(request("services",Map.of("name","alert-replay-service","description","test","resource","http")).body()).get("id").asLong();
+        var original=Map.of("serviceId",serviceId,"source","probe","externalId","retired-event","severity","WARNING",
+            "title","first observation","occurredAt","2026-11-09T00:00:00Z");
+        var first=request("alerts",original);
+        assertEquals(200,first.statusCode(),first.body());
+        var expected=json.readTree(first.body());
+        assertEquals(200,post("services/"+serviceId,Map.of("name","alert-replay-service","description","test","resource","http",
+            "environment","test","active",false,"version",0)));
+        var replay=request("alerts",original);
+        assertEquals(200,replay.statusCode(),replay.body());
+        assertEquals(expected,json.readTree(replay.body()));
+        var changed=new java.util.HashMap<String,Object>(original);
+        changed.put("title","later observation");
+        changed.put("severity","CRITICAL");
+        assertEquals(expected,json.readTree(request("alerts",changed).body()));
+        changed.put("externalId","new-event");
+        assertEquals(409,post("alerts",changed));
+        changed.put("externalId","retired-event");
+        changed.put("source","other-probe");
+        assertEquals(409,post("alerts",changed));
+        var alerts=json.readTree(request("alerts/page?serviceId="+serviceId,null).body());
+        assertEquals(1,alerts.get("total").asLong());
+        assertEquals(expected.get("id"),alerts.get("items").get(0).get("id"));
+    }
+
     @Test void ticketReplaySurvivesServiceDeactivation() throws Exception {
         assertEquals(200,post("login",Map.of("username","admin","password","test-admin-secret")));
         long serviceId=json.readTree(request("services",Map.of("name","replay-service","description","test","resource","http")).body()).get("id").asLong();

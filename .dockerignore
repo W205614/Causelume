@@ -7,3 +7,14 @@
 !frontend/
 !frontend/public/
 !frontend/public/**
+!LICENSE
+!THIRD_PARTY_NOTICES.md
+!deployment/
+!deployment/licenses/
+!deployment/licenses/SOURCES.md
+!agent/
+!agent/requirements.txt
+!agent/common.py
+!agent/observability.py
+!agent/investigator.py
+!agent/checkout.py
