@@ -60,13 +60,15 @@ docker compose version
 ### 克隆并启动
 
 ~~~sh
-git clone https://github.com/W205614/Causelume.git
+git clone --branch v1.0.1 --depth 1 https://github.com/W205614/Causelume.git
 cd Causelume
 python scripts/init_env.py
 docker compose up -d --build --wait
 ~~~
 
 执行 `docker compose ps`，确认 `app`、`agent`、`checkout` 三个服务均为 `healthy`。打开 [健康检查](http://127.0.0.1:18760/api/health)，应看到 `{"status":"UP"}`。
+
+以上固定到稳定源码版本；参与开发时使用默认分支 `main`。本版修复与验证范围见 [v1.0.1 发布检查](docs/release-1.0.1.md)。
 
 ### 登录和体验
 

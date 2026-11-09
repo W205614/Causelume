@@ -27,6 +27,26 @@ class OperationsTest {
     }
     int post(String path,Object data) throws Exception { return request(path,data).statusCode(); }
 
+    @Test void ticketReplaySurvivesServiceDeactivation() throws Exception {
+        assertEquals(200,post("login",Map.of("username","admin","password","test-admin-secret")));
+        long serviceId=json.readTree(request("services",Map.of("name","replay-service","description","test","resource","http")).body()).get("id").asLong();
+        UUID requestId=UUID.randomUUID();
+        var original=Map.of("serviceId",serviceId,"title","replay after retirement","requestId",requestId,"priority","P1");
+        var first=request("tickets",original);
+        assertEquals(200,first.statusCode(),first.body());
+        long id=json.readTree(first.body()).get("id").asLong();
+        assertEquals(200,post("services/"+serviceId,Map.of("name","replay-service","description","test","resource","http",
+            "environment","test","active",false,"version",0)));
+        var replay=request("tickets",original);
+        assertEquals(200,replay.statusCode(),replay.body());
+        assertEquals(id,json.readTree(replay.body()).get("id").asLong());
+        assertEquals(1,json.readTree(replay.body()).get("timeline").size());
+        assertEquals(409,post("tickets",Map.of("serviceId",serviceId,"title","changed payload","requestId",requestId)));
+        assertEquals(409,post("tickets",Map.of("serviceId",serviceId,"title","new request","requestId",UUID.randomUUID())));
+        assertEquals(200,post("login",Map.of("username","operator","password","test-operator-secret")));
+        assertEquals(409,post("tickets",original));
+    }
+
     @Test void simultaneousWritesAndCrossSiteRequests() throws Exception {
         assertEquals(200,post("login",Map.of("username","admin","password","test-admin-secret")));
         var req=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/logout"))

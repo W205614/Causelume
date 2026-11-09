@@ -39,6 +39,8 @@ class Tickets {
         if(input.requestId==null) throw new Problem(400,"需要 requestId");
         String priority=input.priority==null ? "P3" : Problem.choice(input.priority,PRIORITIES,"priority");
         var service=store.one("select active from services where id=? for update",input.serviceId);
+        var prior=store.rows("select id,service_id,alert_id,title,created_priority from tickets where creator_id=? and request_id=?",actor.id(),input.requestId);
+        if(!prior.isEmpty()) return replay(input,title,priority,prior.getFirst());
         if(!Boolean.TRUE.equals(service.get("active"))) throw new Problem(409,"服务已停用");
         if(input.alertId!=null) {
             var alert=store.one("select service_id from alerts where id=?",input.alertId);
@@ -51,13 +53,16 @@ class Tickets {
         } catch (DuplicateKeyException duplicate) {
             var matches=store.rows("select id,service_id,alert_id,title,created_priority from tickets where creator_id=? and request_id=?",actor.id(),input.requestId);
             if(matches.isEmpty()) throw new Problem(409,"该告警已经关联工单");
-            var old=matches.getFirst();
-            if(!Objects.equals(old.get("serviceId"),input.serviceId) || !Objects.equals(old.get("alertId"),input.alertId) || !title.equals(old.get("title")) || !priority.equals(old.get("createdPriority")))
-                throw new Problem(409,"同一 requestId 的请求内容冲突");
-            return detail((long)old.get("id"));
+            return replay(input,title,priority,matches.getFirst());
         }
         record(id,"CREATE",title,actor,null);
         return detail(id);
+    }
+
+    private Map<String,Object> replay(NewTicket input,String title,String priority,Map<String,Object> old) {
+        if(!Objects.equals(old.get("serviceId"),input.serviceId) || !Objects.equals(old.get("alertId"),input.alertId) || !title.equals(old.get("title")) || !priority.equals(old.get("createdPriority")))
+            throw new Problem(409,"同一 requestId 的请求内容冲突");
+        return detail((long)old.get("id"));
     }
 
     @PostMapping("/{id}/actions") @Transactional

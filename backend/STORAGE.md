@@ -5,7 +5,7 @@
 ## 独立部署迁移
 
 ```sh
-java -jar causelume-1.0.0.jar storage migrate-pg
+java -jar causelume-1.0.1.jar storage migrate-pg
 ```
 
 该命令只接收 PostgreSQL APP_DB_URL 和 APP_MIGRATOR_PASSWORD（或对应的受限文件），不启动Web、worker、邮件或账户初始化。成功后撤销业务角色对flyway_schema_history的INSERT/UPDATE/DELETE，保留只读访问。业务表的DML权限仍然保留。非Compose部署也应先执行此命令，再以业务凭据及 SPRING_FLYWAY_ENABLED=false 启动应用；只向迁移进程提供迁移凭据。H2本地演示仍由启动时Flyway增量迁移。
@@ -27,7 +27,7 @@ java -jar causelume-1.0.0.jar storage migrate-pg
 管理员遗失设备和恢复码时，获授权的数据库运维人员可从本机终端执行以下命令。CLI 交互读取新密码，也可通过仅本次使用的 APP_RECOVERY_PASSWORD_FILE 注入。它限制目标角色为 ADMIN，更换密码、清除 MFA 和恢复码、恢复启用并撤销会话，写入 RECOVER_ADMIN 审计。账户再次登录后需要重新绑定。
 
 ```sh
-java -jar causelume-1.0.0.jar storage recover-admin admin
+java -jar causelume-1.0.1.jar storage recover-admin admin
 ```
 
 ## 从 H2 冷备迁移
@@ -37,8 +37,8 @@ java -jar causelume-1.0.0.jar storage recover-admin admin
 3. 准备专用空 PG 数据库。迁移账号需拥有数据库 CREATE、public schema 的 CREATE 权限和对其创建的对象授权的能力。应用账号只需业务表 DML、序列使用权。向 CLI 提供上述数据库连接和角色参数。CLI 凭据按环境值、该变量的 _FILE、/run/secrets/ 同名文件依次读取。
 
 ```sh
-java -jar causelume-1.0.0.jar storage export-h2 /secure/cold-copy/causelume /secure/export/causelume.jsonl
-java -jar causelume-1.0.0.jar storage import-pg /secure/export/causelume.jsonl
+java -jar causelume-1.0.1.jar storage export-h2 /secure/cold-copy/causelume /secure/export/causelume.jsonl
+java -jar causelume-1.0.1.jar storage import-pg /secure/export/causelume.jsonl
 ```
 
 导出接受 Flyway V5 或更新的 H2；基路径不含 .mv.db 后缀。导出遍历业务表和外键，按主键输出 UTF-8 JSONL，附每表行数、SHA-256 和 identity 的下一个值。它拒绝覆盖同名文件。导出中断时使用新的输出路径；缺少完整结束记录的文件无法导入。

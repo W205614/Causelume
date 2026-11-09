@@ -72,13 +72,30 @@ class PostgresAccountsIT {
         assertEquals(ticketId,call(admin,"tickets",ticket,200).get("id").asLong());
         assertEquals(1,call(admin,"tickets/page?q=idempotency",null,200).get("total").asLong());
         call(admin,"tickets/"+ticketId+"/actions",Map.of("version",0,"action","ASSIGN","assigneeId",1,"note","on call"),200);
-        long taskId=call(admin,"tasks",Map.of("ticketId",ticketId,"requestId",UUID.randomUUID()),200).get("id").asLong();
+        var investigation=Map.of("ticketId",ticketId,"requestId",UUID.randomUUID(),
+            "windowStart","2026-11-09T01:00:00.123456789Z","windowEnd","2026-11-09T01:10:00.987654321Z");
+        var legacyRequest=UUID.randomUUID();
+        long legacy=store.insert("insert into tasks(ticket_id,creator_id,request_id,status,window_start,window_end) values (?,1,?,'FAILED',?,?)",
+            ticketId,legacyRequest,Instant.parse((String)investigation.get("windowStart")),Instant.parse((String)investigation.get("windowEnd")));
+        assertEquals(legacy,call(admin,"tasks",Map.of("ticketId",ticketId,"requestId",legacyRequest,
+            "windowStart",investigation.get("windowStart"),"windowEnd",investigation.get("windowEnd")),200).get("id").asLong());
+        long taskId=call(admin,"tasks",investigation,200).get("id").asLong();
+        assertEquals(taskId,call(admin,"tasks",investigation,200).get("id").asLong());
+        assertEquals(taskId,call(admin,"tasks",Map.of("ticketId",ticketId,"requestId",investigation.get("requestId"),
+            "windowStart","2026-11-09T01:00:00.123457Z","windowEnd","2026-11-09T01:10:00.987654Z"),200).get("id").asLong());
+        call(admin,"tasks",Map.of("ticketId",ticketId,"requestId",investigation.get("requestId"),
+            "windowStart","2026-11-09T01:00:00.123458Z","windowEnd",investigation.get("windowEnd")),409);
         for(int i=0;i<100;i++) {
             String status=store.db.queryForObject("select status from tasks where id=?",String.class,taskId);
             if(status.equals("FAILED")) break;
             Thread.sleep(100);
         }
         assertEquals("FAILED",store.one("select status from tasks where id=?",taskId).get("status"));
+        call(admin,"services/1",Map.of("name","checkout","description","retired fixture","resource","http",
+            "environment","test","active",false,"version",0),200);
+        assertEquals(ticketId,call(admin,"tickets",ticket,200).get("id").asLong());
+        call(admin,"tickets",Map.of("serviceId",1,"title","changed payload","requestId",ticket.get("requestId")),409);
+        call(admin,"tickets",Map.of("serviceId",1,"title","new request","requestId",UUID.randomUUID()),409);
         call(admin,"account/password",Map.of("currentPassword","test-admin-secret","newPassword","new-admin-pass"),200);
         call(admin,"me",null,401);
         call(other,"me",null,401);

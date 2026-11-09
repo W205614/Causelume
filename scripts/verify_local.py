@@ -53,7 +53,7 @@ def main():
         start(stack, [sys.executable, "agent/investigator.py"],
               dict(PORT=agent_port, DEMO_URL=checkout, AGENT_MODE="offline", AGENT_TOKEN=bearer,
                    EVIDENCE_TOKEN=reader), agent + "/health")
-        start(stack, ["java", "-jar", "backend/target/causelume-1.0.0.jar"],
+        start(stack, ["java", "-jar", "backend/target/causelume-1.0.1.jar"],
               dict(SERVER_PORT=java_port, SERVER_ADDRESS="127.0.0.1", APP_ADMIN_PASSWORD=admin,
                    APP_OPERATOR_PASSWORD=operator, APP_MFA_KEY=base64.b64encode(secrets.token_bytes(32)).decode(), AGENT_URL=agent, AGENT_TOKEN=bearer, DEMO_URL=checkout,
                    EVIDENCE_TOKEN=reader, APP_DB_URL="jdbc:h2:mem:acceptance;DB_CLOSE_DELAY=-1"), app + "/api/health")

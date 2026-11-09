@@ -18,7 +18,7 @@ Web 页面和 /api 同源。POST 使用 application/json，登录成功后由容
 | GET /api/audit | 管理员查看关键业务操作，含 actor、action、targetId、createdAt |
 
 - 告警等级取 INFO、WARNING、CRITICAL。对同一服务、来源、外部事件 ID 的重投保留首条告警。
-- 每条工单同时表示待调查事件和它的协作记录。一个告警至多关联一个工单。同一操作者的 requestId 重投返回已有工单，请求内容冲突返回 409。
+- 每条工单同时表示待调查事件和它的协作记录。一个告警至多关联一个工单。同一操作者的 requestId 重投返回已有工单，包括其服务后来停用的情况；请求内容冲突返回 409。停用服务仍不允许创建新工单。
 - OPEN → ASSIGNED → PROCESSING → VERIFIED → CLOSED 依次使用 ASSIGN、START、VERIFY、CLOSE。管理员可在 ASSIGNED 状态改派。VERIFY 的 note 记录人工恢复验证，CLOSE 的 note 存为复盘。未关闭时可用 NOTE 追加观察。
 - 每次操作同时比较并递增 version，状态、审计和时间线在同一事务提交。并发写入返回 409 后需重新读取并审阅新记录。
 - 首次创建文件数据库时，通过环境注入 APP_ADMIN_PASSWORD 和 APP_OPERATOR_PASSWORD，分别初始化 admin 和 operator。新增密码至少 12 个字符、最多 72 个 UTF-8 字节，以 BCrypt 哈希存储。重启沿用已有账户。
@@ -36,6 +36,8 @@ Web 页面和 /api 同源。POST 使用 application/json，登录成功后由容
 | POST /api/tasks/{id}/feedback | 已结束任务由管理员或负责人提交一次 feedback；冲突返回 409 |
 
 同一工单只能有一个等待中或运行中的任务。请求标识归属发起账号，重投时返回原任务。每次调查经 PENDING → RUNNING → SUCCEEDED 或 FAILED；失败留存原因。单实例工作者在事务外调用 Python，重启后接续 PENDING、标记遗留 RUNNING 为 FAILED，避免重复调用模型。
+
+可选的 windowStart、windowEnd 必须同时提供且含时区；省略时由服务端选择窗口。输入时间先四舍五入到微秒，再校验、存储和比较重投内容，与数据库原有精度转换一致；规范化后的窗口必须大于零且不超过一小时。同一 requestId 的窗口在微秒精度不同则返回 409。
 
 Java 将服务器端 AGENT_TOKEN 作为 Bearer 凭据，向 AGENT_URL 的 /investigate 发送字符串 taskId、服务名称 service。连接限时 3 秒，单次响应限时 95 秒。成功返回必须匹配 taskId，含 mode(offline/holmes)、非空 evidence（每项包括 source、detail）、possibleCause、uncertainty、recommendation。Java 校验后存储。422、504、服务不可达及无效数据会留下失败记录。反馈及任务创建记录于操作审计。DEMO_URL 的 /logs、/metrics 使用独立 EVIDENCE_TOKEN，只读代理的响应限时 5 秒。
 

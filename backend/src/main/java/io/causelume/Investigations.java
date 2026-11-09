@@ -20,7 +20,13 @@ class Investigations {
         this.json = json;
         this.budgets = budgets;
     }
-    record NewTask(long ticketId, UUID requestId, java.time.Instant windowStart, java.time.Instant windowEnd) {}
+    record NewTask(long ticketId, UUID requestId, java.time.Instant windowStart, java.time.Instant windowEnd) {
+        NewTask {
+            // Match database rounding so pre-existing requests also remain replayable.
+            if(windowStart!=null) windowStart=windowStart.plusNanos(500).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+            if(windowEnd!=null) windowEnd=windowEnd.plusNanos(500).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        }
+    }
     record Feedback(String feedback, String rating) {}
 
     @GetMapping

@@ -13,7 +13,7 @@ RUN sed -i 's|http://archive.ubuntu.com|https://archive.ubuntu.com|g; s|http://s
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 RUN groupadd --system causelume && useradd --system --gid causelume causelume && mkdir /app/data && chown causelume:causelume /app/data
-COPY --from=build /src/backend/target/causelume-1.0.0.jar /app/server.jar
+COPY --from=build /src/backend/target/causelume-1.0.1.jar /app/server.jar
 LABEL org.opencontainers.image.source="https://github.com/W205614/Causelume"
 USER causelume
 EXPOSE 8080
