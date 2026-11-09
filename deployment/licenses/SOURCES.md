@@ -25,6 +25,13 @@ Java/Python application dependencies' source archives. `SHA256SUMS` in the same
 release checks both source ZIPs. The archive is provided with the binary release
 so access does not depend on the future availability of an upstream URL.
 
+Alpine recipes come from the distribution's official GitHub mirror at
+https://github.com/alpinelinux/aports using each installed package's exact source
+commit. Only `main/<package>/` is retained from each Git snapshot, preserving its
+archive metadata and file modes. The manifest records the original snapshot URL,
+commit and SHA-256 separately from the filtered recipe archive's SHA-256; the
+unrelated package directories and download cache are not bundled.
+
 License and copyright locations inside the images:
 
 - Project: `/usr/share/causelume/licenses/LICENSE` and `THIRD_PARTY_NOTICES.md`.

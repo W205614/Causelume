@@ -47,7 +47,7 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     downloads = []
 
-    def fetch(url, relative, expected=None, algorithm="sha256"):
+    def fetch(url, relative, expected=None, algorithm="sha256", record=True):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists() or (expected and hashlib.new(algorithm, path.read_bytes()).hexdigest() != expected):
@@ -69,8 +69,9 @@ def main():
                 raise RuntimeError("Source checksum mismatch: " + url)
             path.write_bytes(data)
         data = path.read_bytes()
-        downloads.append({"path": relative, "url": url, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
-                          "upstreamChecksum": expected, "upstreamChecksumAlgorithm": algorithm if expected else None})
+        if record:
+            downloads.append({"path": relative, "url": url, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                              "upstreamChecksum": expected, "upstreamChecksumAlgorithm": algorithm if expected else None})
         print("Collected " + relative, flush=True)
         return data
 
@@ -119,8 +120,25 @@ def main():
     recipes = {(row["o"], row["c"]) for row in apk if row.get("o")}
     for origin, commit in sorted(recipes):
         # Every installed package in this pinned Alpine base comes from main.
-        recipe_url = f"https://gitlab.alpinelinux.org/alpine/aports/-/archive/{commit}/aports-{commit}.tar.gz?path=main/{origin}"
-        raw = fetch(recipe_url, f"alpine/recipes/{origin}-{commit}.tar.gz")
+        # Alpine's official GitHub mirror serves automated downloads without
+        # GitLab's runner-blocking HTTP 418 challenge. Keep the installed commit.
+        recipe_url = f"https://codeload.github.com/alpinelinux/aports/tar.gz/{commit}"
+        snapshot = fetch(recipe_url, f"cache/aports-{commit}.tar.gz", record=False)
+        prefix = f"aports-{commit}/main/{origin}/"
+        filtered = io.BytesIO()
+        with tarfile.open(fileobj=io.BytesIO(snapshot)) as source, tarfile.open(fileobj=filtered, mode="w:gz") as output:
+            for member in source.getmembers():
+                if member.name.startswith(prefix):
+                    output.addfile(member, source.extractfile(member) if member.isfile() else None)
+        raw = filtered.getvalue()
+        relative = f"alpine/recipes/{origin}-{commit}.tar.gz"
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+        downloads.append({"path": relative, "kind": "filtered-archive", "bytes": len(raw),
+                          "sha256": hashlib.sha256(raw).hexdigest(), "retainedPrefix": prefix,
+                          "derivedFrom": {"url": recipe_url, "sha256": hashlib.sha256(snapshot).hexdigest(),
+                                          "bytes": len(snapshot), "commit": commit}})
         with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
             files = {Path(member.name).name: archive.extractfile(member).read() for member in archive.getmembers() if member.isfile()}
         recipe = files["APKBUILD"].decode()
