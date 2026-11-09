@@ -1,7 +1,7 @@
 name: causelume
 services:
   app:
-    build: .
+    image: ${APP_IMAGE:-ghcr.io/w205614/causelume-app@sha256:b6841eed74640bafbffe650af021268a974be86bfcc5090e6cc6dbe1106ca484}
     environment:
       APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:?run scripts/init_env.py}
       APP_OPERATOR_PASSWORD: ${APP_OPERATOR_PASSWORD:?run scripts/init_env.py}
@@ -31,9 +31,7 @@ services:
       start_period: 30s
 
   agent:
-    build:
-      context: .
-      dockerfile: agent/Dockerfile
+    image: ${AGENT_IMAGE:-ghcr.io/w205614/causelume-agent@sha256:0105eb3ade64962b93f4afb3ab19b27228a2d5b291bebbf8d0affb57ec867a0b}
     environment:
       BIND_HOST: 0.0.0.0
       AGENT_MODE: ${AGENT_MODE:-offline}
@@ -53,9 +51,7 @@ services:
       retries: 5
 
   checkout:
-    build:
-      context: .
-      dockerfile: agent/Dockerfile
+    image: ${AGENT_IMAGE:-ghcr.io/w205614/causelume-agent@sha256:0105eb3ade64962b93f4afb3ab19b27228a2d5b291bebbf8d0affb57ec867a0b}
     command: ["python", "checkout.py"]
     environment:
       BIND_HOST: 0.0.0.0

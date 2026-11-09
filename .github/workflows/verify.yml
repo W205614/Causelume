@@ -59,7 +59,15 @@ jobs:
       - uses: actions/checkout@v4
       - run: python scripts/init_env.py
       - run: docker compose --profile holmes config --quiet
-      - run: docker compose up --build --wait --wait-timeout 150
+      - name: Pull published quickstart images
+        run: docker compose pull app agent checkout
+      - name: Start published quickstart images
+        run: docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
+      - run: python scripts/e2e.py --env-file .env
+      - name: Reset disposable quickstart data
+        run: docker compose down --volumes
+      - name: Build and start source images
+        run: docker compose -f compose.yaml -f compose.build.yaml up -d --build --wait --wait-timeout 180 app agent checkout
       - run: python scripts/e2e.py --env-file .env
       - name: Scan candidate images
         run: |

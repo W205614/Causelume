@@ -44,7 +44,7 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 ### 准备环境
 
-本地体验需要 Git、Python 3.13 和已启动的 [Docker Desktop](https://docs.docker.com/compose/install/)（使用 Linux 容器）。Linux 也可使用 Docker Engine 与 Compose 插件。Java 构建与运行、H2 数据库均在容器内；前端为静态文件，本机无需安装 Node.js。
+本地体验需要 Git、Python 3.13 和已启动的 [Docker Desktop](https://docs.docker.com/compose/install/)（使用 Linux 容器）。Linux 也可使用 Docker Engine 与 Compose 插件。默认直接运行已发布的 app 和 agent 镜像，本机无需安装 Java、Maven 或 Node.js，也无需编译源码。
 
 在终端检查：
 
@@ -55,20 +55,23 @@ docker version
 docker compose version
 ~~~
 
-首次构建需要联网下载镜像及 Maven/PyPI 依赖。默认采用离线调查模式，无需模型密钥、域名或 SMTP。
+首次启动需要联网从 GHCR 拉取公开镜像，无需登录 GitHub。默认采用离线调查模式，无需模型密钥、域名或 SMTP。
+
+当前发布镜像的平台为 `linux/amd64`，适用于 x86-64 主机上的 Linux 容器环境。
 
 ### 克隆并启动
 
 ~~~sh
-git clone --branch v1.0.2 --depth 1 https://github.com/W205614/Causelume.git
+git clone --depth 1 https://github.com/W205614/Causelume.git
 cd Causelume
 python scripts/init_env.py
-docker compose up -d --build --wait
+docker compose pull app agent checkout
+docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 ~~~
 
 执行 `docker compose ps`，确认 `app`、`agent`、`checkout` 三个服务均为 `healthy`。打开 [健康检查](http://127.0.0.1:18760/api/health)，应看到 `{"status":"UP"}`。
 
-以上固定到稳定源码版本；参与开发时使用默认分支 `main`。本版修复、镜像分发与验证范围见 [v1.0.2 发布检查](docs/release-1.0.2.md)。
+以上克隆默认分支 `main`，使用其中的镜像启动入口；旧的 `v1.0.2` Tag 保留原始内容，不包含此入口。根目录 Compose 默认固定到已发布的 v1.0.2 app、agent 镜像摘要，对应源码提交 `cf79c8e4cf738f131158816d3dcfa05d3220b9cb`。`checkout` 复用 agent 镜像，以不同命令运行，无需第三个 Package。本版修复、镜像分发与验证范围见 [v1.0.2 发布检查](docs/release-1.0.2.md)。
 
 ### 登录和体验
 
@@ -81,12 +84,14 @@ docker compose up -d --build --wait
 
 业务控制台读写数据库；界面演示使用浏览器内的样例数据。先用 `admin` 登录业务控制台，可在概览查看服务和工单，在「服务与资源」查看内置的 checkout 服务。
 
-停止服务使用 `docker compose stop`；下次使用 `docker compose up -d --wait`。业务数据保存在 Docker 命名卷中，停止后保留。
+停止服务使用 `docker compose stop`；下次使用 `docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout`。业务数据保存在 Docker 命名卷中，停止后保留。
 
 <details>
 <summary>已有部署与本机配置</summary>
 
 已有 `.env` 时跳过初始化，沿用现有账户和数据。升级前备份数据库并在副本上验证迁移，更新镜像后重新创建容器。操作步骤见 [数据迁移](backend/STORAGE.md) 和 [运维手册](docs/operations.md)。
+
+`.env` 中的 `APP_IMAGE` 和 `AGENT_IMAGE` 留空时使用 Compose 固定的发布摘要。需要升级时，将两者设为已验证版本的完整镜像引用（推荐 `ghcr.io/w205614/causelume-app@sha256:…` 和 `ghcr.io/w205614/causelume-agent@sha256:…`），再执行上面的拉取和启动命令。
 
 本机配置可放在不入库的 `compose.override.yaml`。Compose 默认自动合并它；使用 `-f` 时同时列出所需的覆盖文件。`AGENT_MODE=offline` 使用离线规则，`holmes` 使用真实模型。
 
@@ -219,6 +224,14 @@ docs/        接入手册、接口说明、业务规则与验证记录
 
 源码开发使用 Java 21、Maven、Node.js 22 和 Python 3.13。下面的命令用于开发与完整验收；仅通过 Docker 体验项目时，执行上面的快速开始和运行示例即可。
 
+修改源码后，使用显式构建覆盖文件启动开发镜像（先完成 `.env` 初始化）：
+
+~~~sh
+docker compose -f compose.yaml -f compose.build.yaml up -d --build --wait --wait-timeout 180 app agent checkout
+~~~
+
+这会从当前源码构建本地 `causelume-app`、`causelume-agent` 和 `causelume-checkout` 镜像；构建需联网下载 Maven/PyPI 依赖。后续开发操作沿用这两个 `-f` 参数，有本机覆盖文件时再显式追加 `-f compose.override.yaml`。省略构建覆盖文件会恢复使用发布镜像。
+
 ~~~sh
 python -m pip install -r agent/requirements.txt
 npm --prefix frontend ci
@@ -245,7 +258,7 @@ python scripts/verify_candidate.py
 - **找不到 `python` 命令？** Windows 可使用 `py -3.13`，macOS/Linux 可使用已安装的 `python3`，替换文档中的 `python`。
 - **已有 `.env`，初始化报 FileExistsError？** 跳过初始化，保留原配置；脚本不会覆盖已有凭据。
 - **端口被占用？** 在 `.env` 修改 `APP_PORT` 或 `CHECKOUT_PORT` 后重新运行启动命令。相应调整访问地址；验收脚本可用 `--app`、`--checkout` 指定新地址。
-- **服务未进入 healthy？** 用 `docker compose logs --tail 100 app agent checkout` 查看启动日志，再按报错检查配置或镜像、依赖的下载连接。
+- **服务未进入 healthy？** 用 `docker compose logs --tail 100 app agent checkout` 查看启动日志，再按报错检查配置或 GHCR 镜像的下载连接。
 - **本地运行需要云主机、域名或 SMTP 吗？** 不需要，按快速开始使用 Docker Desktop 即可。配置 SMTP 后可将站内通知同时投递到邮箱。
 - **如何切换模型模式？** 默认使用 `AGENT_MODE=offline`。设置模型密钥、预算、`AGENT_MODE=holmes` 和 `COMPOSE_PROFILES=holmes` 后，重新创建容器；本机覆盖文件中的模式设置也需同步调整。
 - **如何反馈问题？** 提供提交号或镜像摘要、复现步骤和脱敏日志。配置排查见 [安全说明](backend/SECURITY.md) 和 [运维手册](docs/operations.md)。

@@ -2,6 +2,8 @@
 
 本地 H2/checkout 演示使用 compose.yaml；Linux 单机部署使用 compose.production.yaml、compose.observability.yaml 和 PostgreSQL。配置操作见 [接入手册](production-setup.md)，隔离环境的集成测试见 [个人版验证记录](personal-release.md)。
 
+根目录 `compose.yaml` 默认拉取固定摘要的公开 app、agent 镜像，checkout 复用 agent 镜像；初始化、拉取与启动命令见 [快速开始](../README.md#快速开始)。需要验证源码改动时，显式合并 `compose.build.yaml`，见 [源码开发与测试](../README.md#源码开发与测试)。
+
 ## 适用场景
 
 项目面向个人与企业内部小团队，采用单实例共享工作区。日常维护包括依赖更新、备份恢复演练、容量检查和模型费用核对。

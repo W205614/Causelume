@@ -1,0 +1,15 @@
+# Explicit source builds for development; the default Compose uses published images.
+services:
+  app:
+    image: causelume-app
+    build: .
+  agent:
+    image: causelume-agent
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+  checkout:
+    image: causelume-checkout
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
