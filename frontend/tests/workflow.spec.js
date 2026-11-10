@@ -140,14 +140,42 @@ test("关闭工单仅负责人显示导出与重开，禁止调整优先级", as
   });
   await page.goto("/#tickets/7");
   await expect(page.getByRole("heading", { name: new RegExp(ticket.title) })).toBeVisible();
-  await expect(page.getByRole("link", { name: "导出复盘" })).toHaveCount(0);
+  await expect(button(page, "导出复盘")).toHaveCount(0);
   await expect(button(page, "重新打开")).toHaveCount(0);
   await expect(button(page, "标记完成")).toBeVisible();
   assigneeId = 12;
   await page.reload();
-  await expect(page.getByRole("link", { name: "导出复盘" })).toBeVisible();
+  await expect(button(page, "导出复盘")).toBeVisible();
   await expect(button(page, "重新打开")).toBeVisible();
   await expect(button(page, "优先级")).toHaveCount(0);
+});
+test("导出复盘以 JSON POST 下载服务端 Markdown", async ({ page }) => {
+  await serve(page);
+  const calls = [];
+  let allowed = false;
+  const downloads = [];
+  page.on("download", download => downloads.push(download));
+  const content = "# Causelume 工单 #7\n\n    cause = sampled failure\n";
+  await page.route("**/api/tickets/7/export?format=markdown", async route => {
+    const req = route.request();
+    calls.push({ method: req.method(), type: req.headers()["content-type"], body: req.postDataJSON() });
+    if (!allowed) {
+      await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ message: "需要工单负责人权限" }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "text/markdown;charset=UTF-8", body: content });
+  });
+  await page.goto("/#tickets/7");
+  await button(page, "导出复盘").click();
+  await expect(page.getByRole("status")).toContainText("需要工单负责人权限");
+  expect(downloads).toHaveLength(0);
+  allowed = true;
+  const downloaded = page.waitForEvent("download");
+  await button(page, "导出复盘").click();
+  const download = await downloaded;
+  expect(download.suggestedFilename()).toBe("ticket-7.md");
+  expect(readFileSync(await download.path(), "utf8")).toBe(content);
+  expect(calls).toEqual(Array(2).fill({ method: "POST", type: "application/json", body: {} }));
 });
 async function serve(page, respond) {
   await page.route("**/api/**", async (route) => {

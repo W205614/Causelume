@@ -45,11 +45,11 @@ class Accounts {
     record Login(String username,String password,String code) {}
     record Account(String username,String password,String role,String email) {}
 
-    @GetMapping("/health") Object health() {
+    @SessionIndependent @GetMapping("/health") Object health() {
         store.db.queryForObject("select 1", Integer.class);
         return Map.of("status","UP");
     }
-    @PostMapping("/login") @Transactional(noRollbackFor=Problem.class) public Actor login(@RequestBody Login login,HttpServletRequest req) {
+    @SessionIndependent @PostMapping("/login") @Transactional(noRollbackFor=Problem.class) public Actor login(@RequestBody Login login,HttpServletRequest req) {
         String peer=req.getRemoteAddr();
         var decision=attempts.check(peer);
         if (decision!=LoginAttempts.Decision.ALLOW) {
@@ -142,7 +142,7 @@ class Accounts {
     private String email(String value) {
         if(value==null || value.isBlank()) return null;
         String addr=value.strip();
-        if(addr.length()>254 || !addr.matches("[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+"))
+        if(addr.length()>254 || !addr.matches("[^\\s@,;<>]++@[^\\s@,;<>.]++(?:\\.[^\\s@,;<>.]++)++"))
             throw new Problem(400,"邮箱格式无效");
         return addr;
     }

@@ -17,7 +17,8 @@ public class ManagementAccess extends OncePerRequestFilter {
     public ManagementAccess(Environment env) { this.env=env; }
 
     @Override protected boolean shouldNotFilter(HttpServletRequest req) {
-        return !req.getRequestURI().startsWith("/actuator");
+        // Match the container-decoded path used by endpoint routing.
+        return !req.getServletPath().startsWith("/actuator");
     }
 
     @Override protected void doFilterInternal(HttpServletRequest req,HttpServletResponse res,FilterChain chain)

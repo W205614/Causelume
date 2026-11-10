@@ -6,7 +6,7 @@ export default defineConfig({
     launchOptions: { executablePath: process.env.CAUSELUME_BROWSER },
   },
   webServer: {
-    command: "python -m http.server 17643 --bind 127.0.0.1 --directory public",
+    command: "python tests/serve.py",
     url: "http://127.0.0.1:17643",
   },
 });

@@ -12,7 +12,8 @@ class ApiBodyLimit extends OncePerRequestFilter {
     static final int MAX_BYTES = 16 * 1024;
 
     @Override protected boolean shouldNotFilter(HttpServletRequest req) {
-        return !req.getRequestURI().startsWith("/api/");
+        // Encoded characters and matrix parameters must not bypass the API limit.
+        return !req.getServletPath().startsWith("/api/");
     }
 
     @Override protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)

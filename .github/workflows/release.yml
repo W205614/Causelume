@@ -22,6 +22,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Verify image content identity parsing
+        run: python scripts/test_image_identity.py
       - name: Build release images
         if: inputs.candidate_run_id == ''
         run: |
@@ -50,18 +52,18 @@ jobs:
           docker save ghcr.io/w205614/causelume-agent:${GITHUB_SHA} -o /tmp/agent.tar
           failed=0
           for image in app agent; do
-            docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v /tmp:/scan:ro aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}.tar --exit-code 1 --severity HIGH,CRITICAL || failed=1
+            docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v /tmp:/scan aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}.tar --format json --output /scan/${image}-scan.json --exit-code 1 --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL || failed=1
           done
           exit "$failed"
       - name: Collect corresponding sources and candidate checksums
         if: inputs.candidate_run_id == ''
         run: |
           version=$(python -c 'import json; print(json.load(open("frontend/package.json"))["version"])')
-          python scripts/collect_image_sources.py --app ghcr.io/w205614/causelume-app:${GITHUB_SHA} --agent ghcr.io/w205614/causelume-agent:${GITHUB_SHA} --version "$version" --output /tmp/sources
+          python scripts/collect_image_sources.py --app ghcr.io/w205614/causelume-app:${GITHUB_SHA} --agent ghcr.io/w205614/causelume-agent:${GITHUB_SHA} --app-archive /tmp/app.tar --agent-archive /tmp/agent.tar --version "$version" --output /tmp/sources
           cp /tmp/sources/manifest.json /tmp/source-manifest.json
           printf '%s\n' "$GITHUB_SHA" > /tmp/commit.txt
           cd /tmp
-          sha256sum app.tar agent.tar source-manifest.json commit.txt causelume-v*-third-party-sources.zip > candidate-SHA256SUMS
+          sha256sum app.tar agent.tar app-scan.json agent-scan.json source-manifest.json commit.txt causelume-v*-third-party-sources.zip > candidate-SHA256SUMS
       - uses: actions/upload-artifact@v4
         if: inputs.candidate_run_id == ''
         with:
@@ -73,6 +75,8 @@ jobs:
             /tmp/source-manifest.json
             /tmp/commit.txt
             /tmp/candidate-SHA256SUMS
+            /tmp/app-scan.json
+            /tmp/agent-scan.json
             /tmp/causelume-v*-third-party-sources.zip
       - name: Validate the candidate run
         if: inputs.candidate_run_id != ''
@@ -110,10 +114,13 @@ jobs:
             test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' ghcr.io/w205614/causelume-${image}:${GITHUB_SHA})" = "$GITHUB_SHA"
           done
           python - <<'PY'
-          import json, os, subprocess
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('../scripts').resolve()))
+          from image_identity import archive_identity
           manifest = json.load(open('source-manifest.json'))
-          for name, expected in manifest['images'].items():
-              actual = subprocess.check_output(['docker', 'image', 'inspect', '--format', '{{.Id}}', 'ghcr.io/w205614/causelume-' + name + ':' + os.environ['GITHUB_SHA']], text=True).strip()
+          for name, expected in manifest['imageContent'].items():
+              actual = archive_identity(Path(name + '.tar'), 'ghcr.io/w205614/causelume-' + name + ':' + os.environ['GITHUB_SHA'])
               assert actual == expected, name
           PY
       - name: Push and record immutable references
@@ -125,15 +132,16 @@ jobs:
           for image in app agent; do
             target=ghcr.io/w205614/causelume-${image}:${GITHUB_SHA}
             if docker manifest inspect "$target" > /tmp/existing.json 2> /tmp/manifest-error; then
-              actual=$(python -c 'import json; print(json.load(open("/tmp/existing.json"))["config"]["digest"])')
-              test "$actual" = "$(docker image inspect --format '{{.Id}}' "$target")" || { echo 'Refusing to replace an existing different image'; exit 1; }
-              docker pull "$target"
+              echo 'Existing immutable tag found; verifying its pulled content before reuse'
             elif grep -Eiq 'manifest unknown|no such manifest|name unknown' /tmp/manifest-error; then
               docker push "$target"
             else
               cat /tmp/manifest-error >&2
               exit 1
             fi
+            docker pull "$target"
+            docker save "$target" -o /tmp/published-${image}.tar
+            python scripts/image_identity.py /tmp/published-${image}.tar "$target" --expected-manifest candidate/source-manifest.json --component "$image" > ${image}-content.json
           done
           docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/w205614/causelume-app:${GITHUB_SHA} > app-image.txt
           docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/w205614/causelume-agent:${GITHUB_SHA} > agent-image.txt
@@ -148,4 +156,6 @@ jobs:
           path: |
             app-image.txt
             agent-image.txt
+            app-content.json
+            agent-content.json
             commit.txt

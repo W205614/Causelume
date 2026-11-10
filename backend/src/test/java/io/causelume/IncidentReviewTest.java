@@ -51,7 +51,7 @@ class IncidentReviewTest {
 
         var created=ok("tickets",Map.of("serviceId",sid,"requestId",UUID.randomUUID(),"title","checkout failed","priority","P1"));
         path="tickets/"+created.get("id").asLong();
-        login("operator");assertEquals(403,call(path+"/export",null).statusCode());
+        login("operator");assertEquals(403,call(path+"/export",Map.of()).statusCode());
         login("admin");act("ASSIGN",Map.of("assigneeId",2));
         login("operator");act("START",Map.of());
         for(String result:new String[]{"UNKNOWN","FAILED"})
@@ -66,11 +66,23 @@ class IncidentReviewTest {
         assertEquals(2,ok(path+"/timeline?page=2&size=2",null).get("items").size());
         store.insert("insert into tasks(ticket_id,creator_id,request_id,status,analysis) values (?,?,?,'SUCCEEDED',?)",
             created.get("id").asLong(),2,UUID.randomUUID(),"{\"privateTrace\":\"excluded-sample\"}");
-        var report=ok(path+"/export?format=json",null);
+        long exports=store.db.queryForObject("select count(*) from audit where action='EXPORT_TICKET'",Long.class);
+        assertEquals(405,call(path+"/export",null).statusCode());
+        var crossSite=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/"+path+"/export"))
+            .header("Content-Type","application/json").header("Origin","https://evil.example")
+            .POST(HttpRequest.BodyPublishers.ofString("{}")).build();
+        assertEquals(403,http.send(crossSite,HttpResponse.BodyHandlers.discarding()).statusCode());
+        var formPost=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/"+path+"/export"))
+            .header("Content-Type","application/x-www-form-urlencoded")
+            .POST(HttpRequest.BodyPublishers.ofString("format=markdown")).build();
+        assertEquals(415,http.send(formPost,HttpResponse.BodyHandlers.discarding()).statusCode());
+        assertEquals(exports,store.db.queryForObject("select count(*) from audit where action='EXPORT_TICKET'",Long.class));
+        var report=ok(path+"/export?format=json",Map.of());
         assertEquals("DONE",report.get("improvements").get(0).get("status").asString());
         assertEquals(1,report.get("investigations").size());
         assertFalse(report.toString().contains("excluded-sample"));
-        var markdown=call(path+"/export?format=markdown",null);assertEquals(200,markdown.statusCode());assertTrue(markdown.body().contains("saturated upstream pool"));
+        var markdown=call(path+"/export?format=markdown",Map.of());assertEquals(200,markdown.statusCode());assertTrue(markdown.body().contains("saturated upstream pool"));
+        assertEquals(exports+2,store.db.queryForObject("select count(*) from audit where action='EXPORT_TICKET'",Long.class));
         assertEquals(403,call("retention/preview",null).statusCode());
         assertEquals("PROCESSING",act("REOPEN",Map.of()).get("status").asString());
         assertEquals("P2",act("PRIORITY",Map.of("priority","P2")).get("priority").asString());

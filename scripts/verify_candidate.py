@@ -132,7 +132,7 @@ def exercise(origin, keys, management_token):
               "cause": "Explicitly injected example fault", "uncertainty": "Candidate traffic only"}
     owner.call(route + "/actions", {"action": "CLOSE", "version": ticket["version"], "note": "Candidate review",
                                     "postmortem": review})
-    report = owner.call(route + "/export?format=json")
+    report = owner.call(route + "/export?format=json", {})
     assert report["ticket"]["status"] == "CLOSED" and report["ticket"]["cause"] == review["cause"]
     assert report["investigations"][0]["id"] == task["id"] and report["timeline"]
     print("PASS recovery signal, human verification, structured review, closure and authorized export", flush=True)
@@ -233,7 +233,7 @@ receivers:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--jar", type=Path, default=ROOT / "backend/target/causelume-1.0.2.jar")
+    parser.add_argument("--jar", type=Path, default=ROOT / "backend/target/causelume-1.0.3.jar")
     parser.add_argument("--runtime-image", default=RUNTIME, help="Java 21 runtime image. The mounted JAR supplies the application.")
     parser.add_argument("--agent-runtime", help="existing Python image with agent requirements; mount current source code")
     parser.add_argument("--backup-image", help="prebuilt image from deployment/backup; defaults to building the source")

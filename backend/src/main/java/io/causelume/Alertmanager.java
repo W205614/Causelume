@@ -25,7 +25,7 @@ class Alertmanager {
         this.store=store; this.notifications=notifications; this.env=env;
     }
 
-    @PostMapping("/{integrationId}") @Transactional
+    @SessionIndependent @PostMapping("/{integrationId}") @Transactional
     public Object receive(@PathVariable String integrationId,@RequestBody JsonNode payload,HttpServletRequest req) {
         String token=env.getProperty("ALERTMANAGER_TOKEN","");
         String expectedIntegration=env.getProperty("ALERTMANAGER_INTEGRATION_ID","primary");

@@ -19,6 +19,8 @@ from urllib.request import Request, urlopen
 from urllib.parse import quote
 import zipfile
 
+from image_identity import archive_identity
+
 
 def docker(image, *command):
     return subprocess.check_output(["docker", "run", "--rm", "--network", "none", "--entrypoint", command[0], image, *command[1:]])
@@ -40,6 +42,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", required=True)
     parser.add_argument("--agent", required=True)
+    parser.add_argument("--app-archive", type=Path, required=True)
+    parser.add_argument("--agent-archive", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--version", required=True)
     args = parser.parse_args()
@@ -78,7 +82,9 @@ def main():
     image_info = dict(zip(("app", "agent"), json.loads(subprocess.check_output(
         ["docker", "image", "inspect", args.app, args.agent]))))
     metadata = {"version": args.version, "images": {name: info["Id"] for name, info in image_info.items()},
-                "imageLabels": {name: info["Config"]["Labels"] for name, info in image_info.items()}}
+                "imageLabels": {name: info["Config"]["Labels"] for name, info in image_info.items()},
+                "imageContent": {"app": archive_identity(args.app_archive, args.app),
+                    "agent": archive_identity(args.agent_archive, args.agent)}}
     installed = docker(args.app, "dpkg-query", "-W", "-f=${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n").decode()
     metadata["ubuntuPackages"] = [dict(zip(("package", "version", "source", "sourceVersion"), line.split("\t"))) for line in installed.splitlines()]
     needed = {(row["source"], row["sourceVersion"]) for row in metadata["ubuntuPackages"]}

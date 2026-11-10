@@ -306,9 +306,11 @@ class OfflineStorage {
                 row.next();
                 if(next<=row.getLong(1)) throw new IllegalArgumentException(table.name+" 序列边界不安全");
             }
-            try(var sql=db.createStatement()) {
+            try(var sql=db.createStatement();var lookup=db.prepareStatement("select pg_get_serial_sequence(?,?)")) {
                 sql.execute("alter table "+table.name+" alter column "+table.identity+" restart with "+next);
-                try(var seq=sql.executeQuery("select pg_get_serial_sequence('"+table.name+"','"+table.identity+"')")) {
+                lookup.setString(1,table.name);
+                lookup.setString(2,table.identity);
+                try(var seq=lookup.executeQuery()) {
                     seq.next();
                     String sequence=seq.getString(1);
                     try(var check=db.createStatement();var state=check.executeQuery("select last_value,is_called from "+sequence)) {

@@ -13,7 +13,7 @@ RUN sed -i 's|http://archive.ubuntu.com|https://archive.ubuntu.com|g; s|http://s
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 RUN groupadd --system causelume && useradd --system --gid causelume causelume && mkdir /app/data && chown causelume:causelume /app/data
-COPY --from=build /src/backend/target/causelume-1.0.2.jar /app/server.jar
+COPY --from=build /src/backend/target/causelume-1.0.3.jar /app/server.jar
 COPY LICENSE THIRD_PARTY_NOTICES.md deployment/licenses/SOURCES.md /usr/share/causelume/licenses/
 COPY --from=build /src/runtime-dependencies.txt /usr/share/causelume/licenses/java-dependencies.txt
 RUN dpkg-query -W > /usr/share/causelume/licenses/ubuntu-packages.txt

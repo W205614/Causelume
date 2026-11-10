@@ -1,6 +1,6 @@
 import { productAction, notificationsPage, budgetPage } from "./product.js";
 import { accountPage, accountAction, clearAccountSecrets } from "./account.js";
-import { demo, request as apiRequest } from "./api.js";
+import { demo, request as apiRequest, exportTicket } from "./api.js";
 import {
   esc,
   brand,
@@ -412,6 +412,28 @@ root.onclick = async (e) => {
     if (started === session) me = fresh;
   } })) return;
   const actionEpoch = epoch;
+  if (op === "export") {
+    const id = ticket.id;
+    btn.disabled = true;
+    try {
+      const blob = await exportTicket(id);
+      if (started !== session) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "ticket-" + id + ".md";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (started === session) {
+        if (err.status === 401) endSession();
+        else reportLate(err.message);
+      }
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
   try {
     if (await productAction(op, arg, { form, input, request, data, ticket, me, render,
       isCurrent: () => epoch === actionEpoch,

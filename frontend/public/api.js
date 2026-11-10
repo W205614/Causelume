@@ -34,3 +34,19 @@ export async function request(path, body) {
   }
   return json;
 }
+
+export async function exportTicket(id) {
+  if (demo) throw Error("界面演示不支持导出，请登录业务控制台。");
+  const response = await fetch("/api/tickets/" + id + "/export?format=markdown", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (!response.ok) {
+    const json = await response.json();
+    throw Object.assign(Error(json.message || "导出失败（HTTP " + response.status + "）"), {
+      status: response.status,
+    });
+  }
+  return response.blob();
+}

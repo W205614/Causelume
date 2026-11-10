@@ -611,7 +611,7 @@ export function detail(
     if (t.status !== "CLOSED") actions += button("priority", "优先级");
     actions += button("improvement", "改进事项");
     if (t.status === "CLOSED") actions += button("reopen", "重新打开");
-    actions += '<a href="/api/tickets/' + t.id + '/export?format=markdown" download>导出复盘</a>';
+    actions += button("export", "导出复盘");
   }
   const related = tasks.filter((task) => task.ticketId === t.id);
   if (

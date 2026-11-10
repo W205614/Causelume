@@ -11,6 +11,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import org.springframework.boot.web.servlet.ServletContextInitializer;
+import org.springframework.web.method.HandlerMethod;
+
+@java.lang.annotation.Target(java.lang.annotation.ElementType.METHOD)
+@java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME)
+@interface SessionIndependent {}
 
 record Actor(long id,String username,String role,String email,boolean mfaEnabled,boolean enrollmentRequired,
              @com.fasterxml.jackson.annotation.JsonIgnore long authVersion) implements Serializable {
@@ -61,9 +66,9 @@ class Access implements WebMvcConfigurer, HandlerInterceptor {
             if (media==null || !media.split(";",2)[0].trim().equalsIgnoreCase("application/json"))
                 throw new Problem(415,"写入请求必须使用 application/json");
         }
-        String path=req.getRequestURI();
-        if (path.equals("/api/health") || path.equals("/api/login")
-                || (req.getMethod().equals("POST") && path.matches("/api/integrations/alertmanager/[A-Za-z0-9_-]{1,64}"))) return true;
+        // Session exemptions belong to the resolved endpoint, not a client-supplied URI spelling.
+        if (handler instanceof HandlerMethod endpoint && endpoint.hasMethodAnnotation(SessionIndependent.class)) return true;
+        String path=req.getServletPath();
         Actor actor=actor(req);
         var versions=store.rows("select auth_version,email from accounts where id=? and active=true",actor.id());
         if (versions.isEmpty() || actor.authVersion()!=(long)versions.getFirst().get("authVersion")) {

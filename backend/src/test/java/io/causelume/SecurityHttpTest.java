@@ -15,7 +15,8 @@ import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={
     "spring.datasource.url=jdbc:h2:mem:security;DB_CLOSE_DELAY=-1","APP_PUBLIC_ORIGIN=https://ops.example",
-    "APP_ADMIN_PASSWORD=test-admin-secret","APP_OPERATOR_PASSWORD=test-operator-secret"})
+    "APP_ADMIN_PASSWORD=test-admin-secret","APP_OPERATOR_PASSWORD=test-operator-secret",
+    "MANAGEMENT_TOKEN=test-management-token"})
 class SecurityHttpTest {
     static com.sun.net.httpserver.HttpServer peer;
     static final java.util.concurrent.CountDownLatch release=new java.util.concurrent.CountDownLatch(1);
@@ -51,6 +52,26 @@ class SecurityHttpTest {
     HttpRequest.Builder post(String path,Object body) {
         return route(path).POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)));
     }
+    @Test void managementTokenCoversEncodedAndMatrixPaths() throws Exception {
+        for (String prefix : new String[]{"/actuator","/actuat%6fr","/%61ctuator","/actuator;ignored","/actuat%6fr;ignored"}) {
+            for (String endpoint : new String[]{"/health","/prometheus"}) {
+                URI uri=URI.create("http://127.0.0.1:"+port+prefix+endpoint);
+                assertEquals(401,send(HttpRequest.newBuilder(uri).GET().build()).statusCode(),uri.toString());
+                assertEquals(401,send(HttpRequest.newBuilder(uri).header("Authorization","Bearer invalid").GET().build()).statusCode(),uri.toString());
+                var authorized=send(HttpRequest.newBuilder(uri).header("Authorization","Bearer test-management-token").GET().build());
+                assertEquals(200,authorized.statusCode(),uri.toString());
+                assertTrue(authorized.body().contains(endpoint.equals("/health") ? "\"status\":\"UP\"" : "jvm_"),authorized.body());
+            }
+        }
+    }
+    @Test void sessionExemptionsFollowResolvedEndpoints() throws Exception {
+        for (String prefix : new String[]{"/api","/a%70i","/api;ignored"}) {
+            URI health=URI.create("http://127.0.0.1:"+port+prefix+"/health");
+            assertEquals(200,send(HttpRequest.newBuilder(health).GET().build()).statusCode());
+            URI users=URI.create("http://127.0.0.1:"+port+prefix+"/users");
+            assertEquals(401,send(HttpRequest.newBuilder(users).GET().build()).statusCode());
+        }
+    }
     @Test @org.springframework.transaction.annotation.Transactional
     void revokedAdminCannotCompleteAnAlreadyAdmittedAccountWrite() {
         long id=store.insert("insert into accounts(username,password_hash,role) values ('race-admin','unused','ADMIN')");
@@ -71,15 +92,21 @@ class SecurityHttpTest {
         var denied=send(post("login",login).header("Origin","https://evil.example")
                 .header("X-Forwarded-Proto","https").header("X-Forwarded-Host","evil.example").build());
         assertEquals(403,denied.statusCode());
-        var success=send(post("login",login).header("Origin","https://ops.example").build());
+        var success=send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/a%70i/login"))
+            .header("Content-Type","application/json").header("Origin","https://ops.example")
+            .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(login))).build());
         assertEquals(200,success.statusCode(),success.body());
         String cookie=success.headers().firstValue("Set-Cookie").orElseThrow();
         assertTrue(cookie.contains("Secure") && cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"),cookie);
         String session=cookie.split(";",2)[0];
         var payload=new byte[ApiBodyLimit.MAX_BYTES+1];
-        for (var body : new HttpRequest.BodyPublisher[]{HttpRequest.BodyPublishers.ofByteArray(payload),
-                HttpRequest.BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(payload))}) {
-            assertEquals(413,send(route("login").POST(body).build()).statusCode());
+        for (String prefix : new String[]{"/api","/a%70i","/api;ignored","/a%70i;ignored"}) {
+            for (var body : new HttpRequest.BodyPublisher[]{HttpRequest.BodyPublishers.ofByteArray(payload),
+                    HttpRequest.BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(payload))}) {
+                URI uri=URI.create("http://127.0.0.1:"+port+prefix+"/login");
+                assertEquals(413,send(HttpRequest.newBuilder(uri).header("Content-Type","application/json")
+                    .header("Cookie",session).POST(body).build()).statusCode(),uri.toString());
+            }
         }
         var first=send(route("users?limit=1").header("Cookie",session).GET().build());
         String cursor=first.headers().firstValue("X-Next-Cursor").orElseThrow();

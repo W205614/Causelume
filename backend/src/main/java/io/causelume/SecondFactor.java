@@ -51,7 +51,7 @@ class SecondFactor {
             cipher.init(Cipher.ENCRYPT_MODE,key,new GCMParameterSpec(128,iv));
             cipher.updateAAD(ByteBuffer.allocate(8).putLong(account).array());
             byte[] ciphertext=cipher.doFinal(seed);
-            return Base64.getEncoder().encodeToString(ByteBuffer.allocate(iv.length+ciphertext.length).put(iv).put(ciphertext).array());
+            return Base64.getEncoder().encodeToString(ByteBuffer.allocate(Math.addExact(iv.length,ciphertext.length)).put(iv).put(ciphertext).array());
         } catch (GeneralSecurityException e) { throw new IllegalStateException("MFA seed 加密失败",e); }
     }
     byte[] decrypt(long account,String envelope) {

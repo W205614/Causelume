@@ -15,6 +15,7 @@ Web 页面和 /api 同源。POST 使用 application/json，登录成功后由容
 | GET/POST /api/tickets | 倒序工单；serviceId、title、requestId（UUID）、可选 alertId，返回工单详情 |
 | GET /api/tickets/{id} | 工单与按时间顺序排列的 timeline |
 | POST /api/tickets/{id}/actions | action、version、note，ASSIGN 还需 assigneeId，返回更新后的详情 |
+| POST /api/tickets/{id}/export?format=json 或 markdown | 管理员或工单负责人以 application/json 请求体 `{}` 导出复盘并记录审计；默认 JSON，markdown 返回下载文本。GET 不执行导出 |
 | GET /api/audit | 管理员查看关键业务操作，含 actor、action、targetId、createdAt |
 
 - 告警等级取 INFO、WARNING、CRITICAL。对同一服务、来源、外部事件 ID 的重投保留首条告警，包括服务后来停用的情况；停用服务仍不允许接收新事件。

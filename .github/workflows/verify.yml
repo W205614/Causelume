@@ -57,6 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: python scripts/test_image_identity.py
       - run: python scripts/init_env.py
       - run: docker compose --profile holmes config --quiet
       - name: Pull published quickstart images
@@ -64,6 +65,14 @@ jobs:
       - name: Start published quickstart images
         run: docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
       - run: python scripts/e2e.py --env-file .env
+      - name: Record published-image scan baseline
+        run: |
+          mkdir -p /tmp/image-scan
+          docker save "$(docker compose images -q app)" -o /tmp/image-scan/app-before.tar
+          docker save "$(docker compose images -q agent)" -o /tmp/image-scan/agent-before.tar
+          for image in app agent; do
+            docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v /tmp/image-scan:/scan aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}-before.tar --format json --output /scan/${image}-before.json --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          done
       - name: Reset disposable quickstart data
         run: docker compose down --volumes
       - name: Build and start source images
@@ -76,7 +85,7 @@ jobs:
           docker save causelume-agent -o /tmp/image-scan/agent.tar
           failed=0
           for image in app agent; do
-            docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v /tmp/image-scan:/scan aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}.tar --format json --output /scan/${image}.json --severity HIGH,CRITICAL --exit-code 1 || failed=1
+            docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v /tmp/image-scan:/scan aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}.tar --format json --output /scan/${image}.json --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --exit-code 1 || failed=1
           done
           exit "$failed"
       - uses: actions/upload-artifact@v4

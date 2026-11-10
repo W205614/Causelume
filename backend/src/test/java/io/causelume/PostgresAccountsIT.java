@@ -55,6 +55,9 @@ class PostgresAccountsIT {
         call(other,"login",once,200);
         call(session(),"login",once,401);
         call(admin,"account/profile",Map.of("email","bad"),400);
+        for(String invalid:List.of("oncall@example..test","oncall@.example.test","oncall@example.test.","!@!."+"!.".repeat(100)))
+            call(admin,"account/profile",Map.of("email",invalid),400);
+        assertEquals("oncall+alerts@ops.example.test",call(admin,"account/profile",Map.of("email"," oncall+alerts@ops.example.test "),200).get("email").asString());
         assertEquals("oncall@example.test",call(admin,"account/profile",Map.of("email","oncall@example.test"),200).get("email").asString());
         call(admin,"users/1/status",Map.of("active",false),409);
         call(operator,"login",Map.of("username","operator","password","test-operator-secret"),200);

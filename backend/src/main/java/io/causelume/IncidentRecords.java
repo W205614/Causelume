@@ -82,7 +82,7 @@ class IncidentRecords {
             "finishedTasks",store.db.queryForObject("select count(*) from tasks where finished_at<? and status in ('SUCCEEDED','FAILED')",Long.class,cutoff));
     }
 
-    @GetMapping("/tickets/{id}/export") @Transactional(isolation=Isolation.REPEATABLE_READ)
+    @PostMapping("/tickets/{id}/export") @Transactional(isolation=Isolation.REPEATABLE_READ)
     public ResponseEntity<?> export(@PathVariable long id,@RequestParam(defaultValue="json")String format,HttpServletRequest req){
         var actor=Access.actor(req);
         var row=store.one("select "+Tickets.COLUMNS+" from tickets where id=?",id);
