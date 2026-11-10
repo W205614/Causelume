@@ -4,6 +4,7 @@ COPY agent/requirements.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir --target /opt/dependencies -r /tmp/requirements.txt
 
 FROM python AS runtime
+RUN apk add --no-cache --upgrade zlib=1.4-r0
 # Dependencies are installed during the build, so the runtime can omit pip.
 RUN python -m pip uninstall --yes pip && rm -r /usr/local/lib/python3.13/ensurepip
 ENV PYTHONPATH=/opt/dependencies PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 BIND_HOST=0.0.0.0

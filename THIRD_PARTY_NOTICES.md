@@ -4,20 +4,20 @@
 
 ## 源码发布范围
 
-源码 Release 发布 Git 跟踪的源码、配置示例、文档和四张使用内置演示数据的控制台截图。源码中没有打包 Maven/PyPI/npm 依赖、模型权重、第三方服务镜像、浏览器、字体或图库素材。前端使用系统字体和项目自有样式；截图不包含真实账户或业务数据。维护者已确认有权以 MIT 发布自有代码和素材。
+源码 Release 发布 Git 跟踪的源码、配置示例、文档和使用内置演示或隔离合成数据的控制台截图。源码中没有打包 Maven/PyPI/npm 依赖、模型权重、第三方服务镜像、浏览器、字体或图库素材。前端使用系统字体和项目自有样式；截图不包含真实账户或业务数据。维护者已确认有权以 MIT 发布自有代码和素材。
 
 参考上游 API 文档与直接复制上游实现的许可责任不同。本次检查未发现另行复制且缺少声明的第三方实现；若后续直接复用代码或素材，应在本文件记录原始来源、版本、修改与许可证，并随分发保留要求的版权和许可文本。
 
 ## Java 运行依赖
 
-本次按 Maven POM（包括继承的许可证）及构建 JAR 中的 71 个嵌套依赖核对。下表按同源组件合并；精确解析版本可运行 `mvn -f backend/pom.xml dependency:tree -Dscope=runtime` 查看。依赖原 JAR 的 LICENSE/NOTICE 保留在嵌套 JAR 中，构建没有移除这些文件。
+本次按 Maven POM（包括继承的许可证）及构建 JAR 中的实际嵌套运行依赖核对。下表按同源组件合并；精确解析版本可运行 `mvn -f backend/pom.xml dependency:tree -Dscope=runtime` 查看。依赖原 JAR 的 LICENSE/NOTICE 保留在嵌套 JAR 中，构建没有移除这些文件。
 
 | 组件（本次解析版本） | 上游许可证与来源 |
 |---|---|
 | Spring Boot 4.1.2（含 jarmode-tools）、Spring Framework 7.0.10、Spring Security Crypto 7.1.2 | [Apache-2.0](https://github.com/spring-projects/spring-boot/blob/v4.1.2/LICENSE.txt) |
 | Tomcat Embed 11.0.27、Log4j 2.25.5、Commons Codec 1.21.0、Commons Logging 1.3.6 | Apache-2.0；各依赖自带 LICENSE/NOTICE |
 | Jackson Core/Databind 3.1.7、Annotations 2.21、SnakeYAML 2.6 | Apache-2.0 |
-| Flyway Core/PostgreSQL 12.4.0、HikariCP 7.0.2 | Apache-2.0 |
+| Flyway Core/PostgreSQL/CockroachDB 13.12.0、HikariCP 7.0.2 | Apache-2.0 |
 | Micrometer 1.17.2、Prometheus Metrics 1.7.0、JSpecify 1.0.1 | Apache-2.0 |
 | SLF4J 2.0.20、Checker Qual 3.55.1 | MIT |
 | java-otp 1.0.0 | [MIT，Jon Chambers](https://github.com/jchambers/java-otp) |
@@ -56,8 +56,8 @@ Compose 引用的独立上游服务镜像不包含在源码附件中，也不由
 
 ## 应用镜像分发
 
-app 基于固定摘要的 Eclipse Temurin 21 JRE / Ubuntu Jammy，agent 基于固定摘要的 CPython 3.13 / Alpine 3.24。镜像随附本项目 LICENSE、本说明及 [对应源码说明](deployment/licenses/SOURCES.md)，位于 `/usr/share/causelume/licenses/`；保留 Temurin legal、Ubuntu copyright、CPython LICENSE 和 Python dist-info 许可证。
+app 基于固定摘要的 Eclipse Temurin 21 JRE / Alpine 3.24，agent 基于固定摘要的 CPython 3.13 / Alpine 3.24。镜像随附本项目 LICENSE、本说明及 [对应源码说明](deployment/licenses/SOURCES.md)，位于 `/usr/share/causelume/licenses/`；保留 Temurin legal、Alpine 组件来源与许可记录、CPython LICENSE 和 Python dist-info 许可证。
 
-镜像版本对应的 Release 同时提供 `causelume-v<版本>-third-party-sources.zip`，包括实际运行版本的 Ubuntu 原源码与发行版补丁、Alpine 精确 commit 的构建配方/补丁及校验后的上游源码、Temurin 和 CPython 源码及应用依赖源包。`manifest.json` 记录镜像 ID、实际组件版本、下载来源与文件摘要；Release 的 SHA256SUMS 校验附件。原始许可、版权与构建脚本随对应源包保留。该附件由 `scripts/collect_image_sources.py` 从最终候选镜像采集；精确源版本缺失或摘要不符会阻止镜像发布，不用新版本源码替代旧二进制对应源码。
+镜像版本对应的 Release 同时提供 `causelume-v<版本>-third-party-sources.zip`，包括两个镜像各自实际运行版本的 Alpine 精确 commit 构建配方/补丁及校验后的上游源码、Temurin 和 CPython 源码及应用依赖源包。`manifest.json` 记录镜像 ID、实际组件版本、下载来源与文件摘要；Release 的 SHA256SUMS 校验附件。原始许可、版权与构建脚本随对应源包保留。该附件由 `scripts/collect_image_sources.py` 从最终候选镜像采集；精确源版本缺失或摘要不符会阻止镜像发布，不用新版本源码替代旧二进制对应源码。
 
 Maven、pip 和前端 Playwright 仅用于构建/测试，不进入应用运行镜像。Holmes、PostgreSQL、Prometheus/Loki 等独立服务继续由 Compose 拉取原始上游镜像，其发行与许可不由本项目 MIT 重新授权。

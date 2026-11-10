@@ -1,7 +1,7 @@
 name: causelume
 services:
   app:
-    image: ${APP_IMAGE:-ghcr.io/w205614/causelume-app@sha256:b6841eed74640bafbffe650af021268a974be86bfcc5090e6cc6dbe1106ca484}
+    image: ${APP_IMAGE:-ghcr.io/w205614/causelume-app:v1.0.3}
     environment:
       APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:?run scripts/init_env.py}
       APP_OPERATOR_PASSWORD: ${APP_OPERATOR_PASSWORD:?run scripts/init_env.py}
@@ -24,14 +24,14 @@ services:
       agent:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /api/health HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3; head -1 <&3 | grep -q ' 200 '"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/health | grep -q '\"status\":\"UP\"'"]
       interval: 10s
       timeout: 4s
       retries: 8
       start_period: 30s
 
   agent:
-    image: ${AGENT_IMAGE:-ghcr.io/w205614/causelume-agent@sha256:0105eb3ade64962b93f4afb3ab19b27228a2d5b291bebbf8d0affb57ec867a0b}
+    image: ${AGENT_IMAGE:-ghcr.io/w205614/causelume-agent:v1.0.3}
     environment:
       BIND_HOST: 0.0.0.0
       AGENT_MODE: ${AGENT_MODE:-offline}
@@ -51,7 +51,7 @@ services:
       retries: 5
 
   checkout:
-    image: ${AGENT_IMAGE:-ghcr.io/w205614/causelume-agent@sha256:0105eb3ade64962b93f4afb3ab19b27228a2d5b291bebbf8d0affb57ec867a0b}
+    image: ${AGENT_IMAGE:-ghcr.io/w205614/causelume-agent:v1.0.3}
     command: ["python", "checkout.py"]
     environment:
       BIND_HOST: 0.0.0.0

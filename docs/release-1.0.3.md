@@ -8,6 +8,8 @@
 - 无会话入口由已解析的处理方法标记决定；健康检查、登录和独立 Bearer 认证的 Alertmanager 入口保留原职责，其他接口仍要求有效会话。
 - 工单导出改为 `POST /api/tickets/{id}/export?format=json|markdown`，使用 JSON 请求体并经过现有 Origin 校验；保留导出权限、审计、内容与数量限制。前端按钮及集成调用方同步迁移；旧 GET 返回 405。
 - 邮箱校验使用不重叠的域标签和占有量词，拒绝空域标签；MFA 密文封装长度使用受检加法；PostgreSQL 序列查找通过绑定参数传入表名和列名。
+- app 保持 Java 21、Linux/amd64 和既有业务卷使用的 UID/GID 999，运行层改为固定摘要的官方 Temurin/Alpine 3.24；app、agent 均升级至已修复的 zlib 1.4-r0。对应源码采集覆盖两个实际 Alpine 运行层。
+- Flyway Core/PostgreSQL 及其 CockroachDB 依赖统一为 13.12.0，H2 继续使用 2.4.240；Mockito 测试采用静态 Java agent。保留 JVM 的 CDS 优化诊断，不通过隐藏日志获得通过。
 
 ## 验证与扫描范围
 

@@ -4,19 +4,16 @@ Run after building the final images. Downloads use official distribution indexes
 their checksums; any missing source stops packaging instead of producing a partial bundle.
 """
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from http.client import HTTPException
 import io
 import json
-import lzma
 from pathlib import Path
 import re
 import subprocess
 import tarfile
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from urllib.parse import quote
 import zipfile
 
 from image_identity import archive_identity
@@ -85,45 +82,17 @@ def main():
                 "imageLabels": {name: info["Config"]["Labels"] for name, info in image_info.items()},
                 "imageContent": {"app": archive_identity(args.app_archive, args.app),
                     "agent": archive_identity(args.agent_archive, args.agent)}}
-    installed = docker(args.app, "dpkg-query", "-W", "-f=${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n").decode()
-    metadata["ubuntuPackages"] = [dict(zip(("package", "version", "source", "sourceVersion"), line.split("\t"))) for line in installed.splitlines()]
-    needed = {(row["source"], row["sourceVersion"]) for row in metadata["ubuntuPackages"]}
-    sources = {}
-    for suite, host in (("jammy", "archive.ubuntu.com"), ("jammy-updates", "archive.ubuntu.com"), ("jammy-security", "security.ubuntu.com")):
-        url = f"https://{host}/ubuntu/dists/{suite}/main/source/Sources.xz"
-        index = lzma.decompress(fetch(url, f"indexes/{suite}-Sources.xz")).decode()
-        for entry in paragraphs(index):
-            identity = (entry.get("Package"), entry.get("Version"))
-            if identity in needed:
-                sources[identity] = (host, entry)
-    # Superseded packages in a fixed base may no longer appear in the live APT
-    # index. Launchpad retains their exact published source files.
-    for package, version in sorted(needed - sources.keys()):
-        query = "https://api.launchpad.net/1.0/ubuntu/+archive/primary?ws.op=getPublishedSources&exact_match=true"
-        query += f"&source_name={quote(package)}&version={quote(version)}"
-        published = json.loads(fetch(query, f"indexes/launchpad-{package}.json"))
-        publication = next(row for row in published["entries"] if row["source_package_version"] == version)
-        urls = json.loads(fetch(publication["self_link"] + "?ws.op=sourceFileUrls", f"indexes/launchpad-{package}-files.json"))
-        dsc_url = next(url for url in urls if url.endswith(".dsc"))
-        dsc = fetch(dsc_url, "ubuntu/" + dsc_url.rsplit("/", 1)[1]).decode()
-        sums = re.search(r"Checksums-Sha256:\n((?: .+\n)+)", dsc).group(1)
-        for line in sums.splitlines():
-            digest, size, filename = line.split()
-            url = next(url for url in urls if url.endswith("/" + filename))
-            fetch(url, "ubuntu/" + filename, digest)
-    ubuntu_downloads = []
-    for (package, version), (host, entry) in sorted(sources.items()):
-        for row in entry["Checksums-Sha256"].splitlines():
-            if not row.strip():
-                continue
-            digest, size, filename = row.split()
-            ubuntu_downloads.append((f"https://{host}/ubuntu/{entry['Directory']}/{filename}", f"ubuntu/{filename}", digest))
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        list(pool.map(lambda item: fetch(*item), ubuntu_downloads))
-
-    apk = list(paragraphs(docker(args.agent, "cat", "/lib/apk/db/installed").decode()))
-    metadata["alpinePackages"] = [{key: row.get(key) for key in ("P", "V", "L", "o", "c")} for row in apk]
-    recipes = {(row["o"], row["c"]) for row in apk if row.get("o")}
+    metadata["alpinePackages"] = {}
+    metadata["alpineReleases"] = {}
+    recipes = set()
+    for name, image in (("app", args.app), ("agent", args.agent)):
+        release = docker(image, "cat", "/etc/alpine-release").decode().strip()
+        if not release.startswith("3.24."):
+            raise ValueError("The source collector requires the declared Alpine 3.24 runtime: " + name)
+        metadata["alpineReleases"][name] = release
+        apk = list(paragraphs(docker(image, "cat", "/lib/apk/db/installed").decode()))
+        metadata["alpinePackages"][name] = [{key: row.get(key) for key in ("P", "V", "L", "o", "c")} for row in apk]
+        recipes.update((row["o"], row["c"]) for row in apk if row.get("o"))
     for origin, commit in sorted(recipes):
         # Every installed package in this pinned Alpine base comes from main.
         # Alpine's official GitHub mirror serves automated downloads without

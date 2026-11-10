@@ -11,7 +11,8 @@ permissions:
   actions: read
   packages: write
 concurrency:
-  group: causelume-images-${{ github.sha }}
+  # Version aliases are shared across commits, so their check/push must be serialized.
+  group: causelume-images-${{ github.repository }}
   cancel-in-progress: false
 jobs:
   images:
@@ -22,6 +23,8 @@ jobs:
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.13"
+      - name: Initialize offline acceptance configuration
+        run: python scripts/init_env.py
       - name: Verify image content identity parsing
         run: python scripts/test_image_identity.py
       - name: Build release images
@@ -33,7 +36,6 @@ jobs:
       - name: Exercise the exact images before publishing
         if: inputs.candidate_run_id == ''
         run: |
-          python scripts/init_env.py
           python - <<'PY'
           import json, os
           from pathlib import Path
@@ -64,6 +66,16 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > /tmp/commit.txt
           cd /tmp
           sha256sum app.tar agent.tar app-scan.json agent-scan.json source-manifest.json commit.txt causelume-v*-third-party-sources.zip > candidate-SHA256SUMS
+      - uses: actions/upload-artifact@v7.0.2
+        if: inputs.candidate_run_id == ''
+        with:
+          name: candidate-metadata
+          path: |
+            /tmp/source-manifest.json
+            /tmp/commit.txt
+            /tmp/candidate-SHA256SUMS
+            /tmp/app-scan.json
+            /tmp/agent-scan.json
       - uses: actions/upload-artifact@v7.0.2
         if: inputs.candidate_run_id == ''
         with:
@@ -119,6 +131,7 @@ jobs:
           sys.path.insert(0, str(Path('../scripts').resolve()))
           from image_identity import archive_identity
           manifest = json.load(open('source-manifest.json'))
+          assert manifest['version'] == json.load(open('../frontend/package.json'))['version'], 'Candidate version mismatch'
           for name, expected in manifest['imageContent'].items():
               actual = archive_identity(Path(name + '.tar'), 'ghcr.io/w205614/causelume-' + name + ':' + os.environ['GITHUB_SHA'])
               assert actual == expected, name
@@ -129,28 +142,81 @@ jobs:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          version=$(python -c 'import json; print(json.load(open("frontend/package.json"))["version"])')
           for image in app agent; do
-            target=ghcr.io/w205614/causelume-${image}:${GITHUB_SHA}
-            if docker manifest inspect "$target" > /tmp/existing.json 2> /tmp/manifest-error; then
-              echo 'Existing immutable tag found; verifying its pulled content before reuse'
-            elif grep -Eiq 'manifest unknown|no such manifest|name unknown' /tmp/manifest-error; then
-              docker push "$target"
-            else
-              cat /tmp/manifest-error >&2
-              exit 1
-            fi
-            docker pull "$target"
-            docker save "$target" -o /tmp/published-${image}.tar
-            python scripts/image_identity.py /tmp/published-${image}.tar "$target" --expected-manifest candidate/source-manifest.json --component "$image" > ${image}-content.json
+            source=ghcr.io/w205614/causelume-${image}:${GITHUB_SHA}
+            for alias in commit version; do
+              tag=$GITHUB_SHA
+              if [ "$alias" = version ]; then tag=v${version}; fi
+              target=ghcr.io/w205614/causelume-${image}:${tag}
+              if docker manifest inspect "$target" > /tmp/existing.json 2> /tmp/manifest-error; then
+                echo 'Existing immutable tag found; verifying its pulled content before reuse'
+              elif grep -Eiq 'manifest unknown|no such manifest|name unknown' /tmp/manifest-error; then
+                if [ "$target" != "$source" ]; then docker tag "$source" "$target"; fi
+                docker push "$target"
+              else
+                cat /tmp/manifest-error >&2
+                exit 1
+              fi
+              docker pull "$target"
+              docker save "$target" -o /tmp/published-${image}-${alias}.tar
+              python scripts/image_identity.py /tmp/published-${image}-${alias}.tar "$target" --expected-manifest candidate/source-manifest.json --component "$image" > ${image}-${alias}-content.json
+              docker buildx imagetools inspect "$target" --format '{{json .Manifest}}' > /tmp/${image}-${alias}-manifest.json
+            done
           done
-          docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/w205614/causelume-app:${GITHUB_SHA} > app-image.txt
-          docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/w205614/causelume-agent:${GITHUB_SHA} > agent-image.txt
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          version = json.load(open('frontend/package.json'))['version']
+          result = {'commit': os.environ['GITHUB_SHA'], 'version': version, 'images': {}}
+          for name in ('app', 'agent'):
+              repository = 'ghcr.io/w205614/causelume-' + name
+              result['images'][name] = {}
+              for alias, tag in (('commit', os.environ['GITHUB_SHA']), ('version', 'v' + version)):
+                  target = repository + ':' + tag
+                  descriptor = json.load(open('/tmp/' + name + '-' + alias + '-manifest.json'))
+                  reference = repository + '@' + descriptor['digest']
+                  inspected = json.loads(subprocess.check_output(['docker', 'image', 'inspect', target]))[0]
+                  assert reference in inspected['RepoDigests'], 'Registry digest not present in pulled image: ' + target
+                  Path(name + '-' + alias + '-image.txt').write_text(reference + '\n')
+                  content = json.load(open(name + '-' + alias + '-content.json'))
+                  result['images'][name][alias] = {'tag': tag, 'reference': target, 'registryReference': reference, 'content': content}
+              # Legacy receipts identify the immutable full-commit alias.
+              Path(name + '-image.txt').write_bytes(Path(name + '-commit-image.txt').read_bytes())
+              Path(name + '-content.json').write_bytes(Path(name + '-commit-content.json').read_bytes())
+          Path('images.json').write_text(json.dumps(result, indent=2) + '\n')
+          Path('version.txt').write_text(version + '\n')
+          PY
           printf '%s\n' "$GITHUB_SHA" > commit.txt
-      - name: Stop the disposable acceptance stack
-        if: always() && inputs.candidate_run_id == ''
-        run: docker compose -p causelume-release -f compose.yaml -f /tmp/release-images.json down --volumes
-      - uses: actions/upload-artifact@v7.0.2
+      - name: Exercise the published default Compose images
         if: inputs.candidate_run_id != ''
+        run: |
+          python - <<'PY'
+          import json, subprocess
+          version = json.load(open('frontend/package.json'))['version']
+          config = json.loads(subprocess.check_output(['docker', 'compose', '-p', 'causelume-release', '-f', 'compose.yaml', 'config', '--format', 'json']))
+          assert set(config['services']) == {'app', 'agent', 'checkout'}, 'Unexpected default services'
+          for name in ('app', 'agent', 'checkout'):
+              component = 'app' if name == 'app' else 'agent'
+              assert config['services'][name]['image'] == 'ghcr.io/w205614/causelume-' + component + ':v' + version, name
+              assert 'build' not in config['services'][name], name
+          for name in ('app', 'agent'):
+              assert config['services'][name]['environment']['AGENT_MODE'] == 'offline', name
+          PY
+          docker compose -p causelume-release -f compose.yaml pull app agent checkout
+          docker compose -p causelume-release -f compose.yaml up -d --no-build --wait --wait-timeout 180 app agent checkout
+          python scripts/e2e.py --env-file .env --expect-mode offline
+      - name: Stop the disposable acceptance stack
+        if: always()
+        run: |
+          if [ ! -f .env ]; then exit 0; fi
+          if [ -f /tmp/release-images.json ]; then
+            docker compose -p causelume-release -f compose.yaml -f /tmp/release-images.json down --volumes
+          else
+            docker compose -p causelume-release -f compose.yaml down --volumes
+          fi
+      - uses: actions/upload-artifact@v7.0.2
+        if: always() && inputs.candidate_run_id != ''
         with:
           name: release-manifest
           path: |
@@ -158,4 +224,14 @@ jobs:
             agent-image.txt
             app-content.json
             agent-content.json
+            app-commit-image.txt
+            agent-commit-image.txt
+            app-version-image.txt
+            agent-version-image.txt
+            app-commit-content.json
+            agent-commit-content.json
+            app-version-content.json
+            agent-version-content.json
+            images.json
+            version.txt
             commit.txt

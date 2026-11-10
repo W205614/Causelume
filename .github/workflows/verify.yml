@@ -55,17 +55,22 @@ jobs:
             robustadev/holmes:0.46.0@sha256:bec9d14eea6a8890ba498c91ab47adcce3af9b6d0c6ee26d642d4e3e0df6218e /contract/verify.py
   deployment:
     runs-on: ubuntu-latest
+    # Record the previous published baseline before building the current source.
+    # The release promotion separately verifies the new default version after pushing it.
+    env:
+      APP_IMAGE: ghcr.io/w205614/causelume-app@sha256:b6841eed74640bafbffe650af021268a974be86bfcc5090e6cc6dbe1106ca484
+      AGENT_IMAGE: ghcr.io/w205614/causelume-agent@sha256:0105eb3ade64962b93f4afb3ab19b27228a2d5b291bebbf8d0affb57ec867a0b
     steps:
       - uses: actions/checkout@v7.0.1
       - run: python scripts/test_image_identity.py
       - run: python scripts/init_env.py
       - run: docker compose --profile holmes config --quiet
-      - name: Pull published quickstart images
+      - name: Pull previous published baseline images
         run: docker compose pull app agent checkout
-      - name: Start published quickstart images
+      - name: Start previous published baseline images
         run: docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
       - run: python scripts/e2e.py --env-file .env
-      - name: Record published-image scan baseline
+      - name: Record previous published-image scan baseline
         run: |
           mkdir -p /tmp/image-scan
           docker save "$(docker inspect --format '{{.Config.Image}}' "$(docker compose ps -q app)")" -o /tmp/image-scan/app-before.tar
@@ -73,7 +78,7 @@ jobs:
           for image in app agent; do
             docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v /tmp/image-scan:/scan aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}-before.tar --format json --output /scan/${image}-before.json --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
           done
-      - name: Reset disposable quickstart data
+      - name: Reset disposable baseline data
         run: docker compose down --volumes
       - name: Build and start source images
         run: docker compose -f compose.yaml -f compose.build.yaml up -d --build --wait --wait-timeout 180 app agent checkout
