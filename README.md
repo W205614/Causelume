@@ -6,6 +6,8 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 [快速开始](#快速开始) · [第一次体验](#第一次体验) · [源码阅读入口](#源码阅读入口) · [文档导航](docs/README.md) · [Linux 部署](docs/production-setup.md)
 
+当前版本：[v1.0.3](https://github.com/W205614/Causelume/releases/tag/v1.0.3)。应用通过公开 Docker/OCI 镜像分发，源码和第三方对应源码随 Release 提供。
+
 - **体验界面**　打开部署后的 `/?demo=1`。页面标记「模拟数据」，可以试派工和调查；刷新会重置样例。
 - **验证完整流程**　使用默认的离线模式。示例 checkout 会真正返回 503、生成日志与指标，Python 使用规则分析，全程无需模型密钥。
 - **接入模型**　HolmesGPT 的两个只读工具复查该次调查冻结的证据。模型给出推断和不确定性，由负责人核对。真实调用会产生供应商费用。
@@ -27,6 +29,12 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 </details>
 
+以下为 **v1.0.3 实际模型调查**，于 2026-11-10 在隔离环境使用合成 checkout 故障采集。左侧是冻结指标、日志及两项真实工具返回，右侧是模型推断和不确定性；分析建议需要人工核对。
+
+![v1.0.3 真实调查：两项冻结工具证据、模型推断与已保存的人工反馈](docs/images/investigation-v1.0.3.png)
+
+本次调查成功并完成 503→200 恢复闭环；画面保留调查时点的分析，不将后续恢复写成模型已经确认的结果。费用待供应商核对，单次验收不能证明长期可用性。素材来源与边界见 [发布验证](docs/release-1.0.3.md)。
+
 ## 适用范围与主要能力
 
 项目采用单实例、单 worker，提供共享运维工作区。管理员维护账户、服务与派工；成员共享查看工单和诊断证据，负责人及管理员推进处理、记录复盘并导出报告。支持 Docker Desktop 本地运行和 Linux 单机部署。
@@ -41,6 +49,12 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 | 数据与交付 | H2→PostgreSQL 核对迁移、生产编排、加密备份、隔离恢复、平台指标、CI 扫描及摘要发布 |
 
 ## 快速开始
+
+| 使用方式 | 需要的本机工具 | 入口 |
+|---|---|---|
+| 直接使用已发布镜像 | Git、Python 3.13、Docker/Compose | 下方快速开始 |
+| 修改源码后在 Docker 中构建 | 同上；构建工具在镜像内 | [源码 Docker 构建](#源码开发与测试) |
+| 在宿主机开发和测试 | Java 21、Maven、Node.js 22、Python 3.13；集成测试还需 Docker | [源码开发与测试](#源码开发与测试) |
 
 ### 准备环境
 
@@ -62,7 +76,7 @@ docker compose version
 ### 克隆并启动
 
 ~~~sh
-git clone --depth 1 https://github.com/W205614/Causelume.git
+git clone --branch v1.0.3 --depth 1 https://github.com/W205614/Causelume.git
 cd Causelume
 python scripts/init_env.py
 docker compose pull app agent checkout
@@ -71,7 +85,14 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 
 执行 `docker compose ps`，确认 `app`、`agent`、`checkout` 三个服务均为 `healthy`。打开 [健康检查](http://127.0.0.1:18760/api/health)，应看到 `{"status":"UP"}`。
 
-以上克隆默认分支 `main`，使用其中的镜像启动入口；旧的 `v1.0.2` Tag 保留原始内容，不包含此入口。根目录 Compose 默认固定到已发布的 v1.0.2 app、agent 镜像摘要，对应源码提交 `cf79c8e4cf738f131158816d3dcfa05d3220b9cb`。`checkout` 复用 agent 镜像，以不同命令运行，无需第三个 Package。本版修复、镜像分发与验证范围见 [v1.0.2 发布检查](docs/release-1.0.2.md)。
+以上克隆固定版本 `v1.0.3`，其源码提交为 `6dc18d68dfdaf62406e430a8296923fd5e25283f`。根目录 `compose.yaml` 已将服务名映射到下面的完整镜像地址，`docker compose pull app agent checkout` 会读取这些地址；`app`、`agent` 是服务名。`checkout` 以不同命令复用 agent 镜像，无需第三个 Package。
+
+| Compose 服务 | 默认公开镜像 | 本版不可变摘要 |
+|---|---|---|
+| `app` | `ghcr.io/w205614/causelume-app:v1.0.3` | `sha256:014563da9123dd0f1c4b83273cfb3ce99c3f707dbef5f5be8130152cf50d05af` |
+| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.0.3` | `sha256:bb2a8d926fea0a336bae11190161bf6fc17622b8c3564a4ce2cd89a2cc6d3244` |
+
+两个镜像也提供完整源码提交号标签，内容与版本标签一致。[app Package](https://github.com/users/W205614/packages/container/package/causelume-app) · [agent Package](https://github.com/users/W205614/packages/container/package/causelume-agent) · [Release 镜像清单](https://github.com/W205614/Causelume/releases/download/v1.0.3/images.json)。本版安全修复、扫描和真实运行边界见 [v1.0.3 发布验证](docs/release-1.0.3.md)。
 
 ### 登录和体验
 
@@ -91,7 +112,7 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 
 已有 `.env` 时跳过初始化，沿用现有账户和数据。升级前备份数据库并在副本上验证迁移，更新镜像后重新创建容器。操作步骤见 [数据迁移](backend/STORAGE.md) 和 [运维手册](docs/operations.md)。
 
-`.env` 中的 `APP_IMAGE` 和 `AGENT_IMAGE` 留空时使用 Compose 固定的发布摘要。需要升级时，将两者设为已验证版本的完整镜像引用（推荐 `ghcr.io/w205614/causelume-app@sha256:…` 和 `ghcr.io/w205614/causelume-agent@sha256:…`），再执行上面的拉取和启动命令。
+`.env` 中的 `APP_IMAGE` 和 `AGENT_IMAGE` 未设置或留空时使用上表的版本标签。需要按摘要锁定时，将两者设为完整引用 `ghcr.io/w205614/causelume-app@sha256:…` 和 `ghcr.io/w205614/causelume-agent@sha256:…`，填入上表或目标 Release 的实际摘要，再执行拉取和启动命令。升级不覆盖旧公开版本；更新配置也不会重置已有数据库中的账号密码。
 
 本机配置可放在不入库的 `compose.override.yaml`。Compose 默认自动合并它；使用 `-f` 时同时列出所需的覆盖文件。`AGENT_MODE=offline` 使用离线规则，`holmes` 使用真实模型。
 
@@ -129,7 +150,7 @@ python scripts/e2e.py --env-file .env --expect-mode offline
 
 本地体验之后，可按需部署到 Linux 单机，使用 PostgreSQL 18、TOTP、邮件通知、Prometheus/Alertmanager/Loki/Alloy、Caddy HTTPS 和加密备份。准备主机、域名及服务账户后，按下表填写配置。凭据存放在受限文件中。
 
-完整步骤见 [Linux 接入手册](docs/production-setup.md)。源码版本从 [GitHub Releases](https://github.com/W205614/Causelume/releases) 获取；镜像按需通过 [手动镜像工作流](https://github.com/W205614/Causelume/actions/workflows/release.yml) 单独发布。
+完整步骤见 [Linux 接入手册](docs/production-setup.md)。v1.0.3 的镜像已发布，可直接使用 Release 中的摘要；普通使用者无需触发发布工作流。源码版本与对应源码材料见 [GitHub Releases](https://github.com/W205614/Causelume/releases)。
 
 <details>
 <summary>查看外部服务配置与发布命令</summary>
@@ -153,7 +174,7 @@ python scripts/init_production.py
 
 编辑 production.env 和 secrets/ 外部凭据文件。保管 APP_MFA_KEY 与 restic 恢复密码的独立恢复副本。生产账户的首次绑定及恢复见 [账户与数据迁移](backend/STORAGE.md)。
 
-创建版本 Tag 或 GitHub Release 不会发布镜像或部署服务。需要 GHCR 镜像时，由维护者确认包可见性、费用和目标提交后手动触发镜像工作流。下载该次运行的 release-manifest，将已验证的 app/agent 镜像摘要填入 APP_IMAGE、AGENT_IMAGE，APP_RELEASE 填提交号。发布前查看安全扫描结果，运行：
+创建 Tag 或 Release 不会自动部署服务。使用已发布版本时，从目标 Release 的 `images.json` 取得 app/agent 完整摘要引用，填入 `APP_IMAGE`、`AGENT_IMAGE`，`APP_RELEASE` 填镜像来源提交号。维护者发布新版本才需要手动镜像工作流。部署前检查目标版本的安全扫描、备份和外部资源，运行：
 
 ~~~sh
 docker compose --env-file production.env -f compose.production.yaml -f compose.observability.yaml config --quiet
@@ -176,6 +197,18 @@ sudo sh scripts/release.sh
 ## 系统架构
 
 Java 21/Spring Boot/Spring JDBC 负责业务、权限、持久化与任务；Python 与 HolmesGPT 负责采集和分析。Linux 部署采用 PostgreSQL，由独立迁移任务升级数据库，业务进程使用单独的运行账户。查询网关提供 Prometheus/Loki 的只读入口，观测组件通过内部网络连接。通知通过事务 Outbox 投递，调查 worker 在 Java 进程内运行。
+
+默认本地路线中，app 同时提供控制台与 API，使用 H2 命名卷；agent 采集 checkout 的指标和日志并执行离线规则分析。只有显式启用 Holmes 模式时才连接外部模型：
+
+```mermaid
+flowchart LR
+    Browser[浏览器] --> App[app 控制台与业务 API]
+    App --> H2[(business 卷 / H2)]
+    App --> Agent[agent 取证与分析]
+    Agent --> Checkout[checkout 示例指标与日志]
+    Agent -. 可选冻结证据工具 .-> Holmes[HolmesGPT]
+    Holmes -. 显式启用并配置预算 .-> Model[外部模型 API]
+```
 
 <details>
 <summary>查看 Linux 部署架构图</summary>
@@ -222,7 +255,7 @@ docs/        接入手册、接口说明、业务规则与验证记录
 
 ## 源码开发与测试
 
-源码开发使用 Java 21、Maven、Node.js 22 和 Python 3.13。下面的命令用于开发与完整验收；仅通过 Docker 体验项目时，执行上面的快速开始和运行示例即可。
+源码 Docker 构建沿用快速开始的 Git、Python 和 Docker/Compose；Java/Maven/Python 依赖在构建阶段安装。宿主机开发与下面的测试命令使用 Java 21、Maven、Node.js 22 和 Python 3.13。
 
 修改源码后，使用显式构建覆盖文件启动开发镜像（先完成 `.env` 初始化）：
 
@@ -231,6 +264,14 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build --wait --wait
 ~~~
 
 这会从当前源码构建本地 `causelume-app`、`causelume-agent` 和 `causelume-checkout` 镜像；构建需联网下载 Maven/PyPI 依赖。后续开发操作沿用这两个 `-f` 参数，有本机覆盖文件时再显式追加 `-f compose.override.yaml`。省略构建覆盖文件会恢复使用发布镜像。
+
+宿主机开发先建立独立 Python 环境（Windows PowerShell 激活 `.\.venv\Scripts\Activate.ps1`，Linux/macOS 使用 `source .venv/bin/activate`），再安装依赖：
+
+~~~sh
+python -m venv .venv
+~~~
+
+激活环境后执行：
 
 ~~~sh
 python -m pip install -r agent/requirements.txt
@@ -249,9 +290,9 @@ python agent/verify_alertmanager.py
 python scripts/verify_candidate.py
 ~~~
 
-可用 `CAUSELUME_BROWSER` 指定本机 Edge/Chromium，Windows 的 Maven 路径可通过 `--maven` 指定。自动化验收使用独立测试数据、Mailpit 和离线调查。
+可用 `CAUSELUME_BROWSER` 环境变量指定本机 Edge/Chromium。`java`、`node` 和 `mvn` 需在 PATH；只有 `verify_postgres.py` 支持 `--maven` 指定 Maven 路径，`verify_local.py` 不支持该参数。先执行上面的 Maven 构建，再运行依赖本地 JAR 的验收。自动化验收使用独立测试数据、Mailpit 和离线调查。
 
-测试覆盖浏览器交互、业务 API、数据库迁移、告警通知、观测取证、模型工具协议及备份恢复。离线与真实模型完整流程的运行结果见 [验证记录](docs/team-release-2026-11-06.md)。
+`verify_local.py` 启动临时数据库与独立测试进程，结束后关闭；它用于验收，不是持久化日常开发服务器。测试覆盖浏览器交互、业务 API、数据库迁移、告警通知、观测取证、模型工具协议及备份恢复。当前版本的离线、真实模型及日常升级结果见 [v1.0.3 发布验证](docs/release-1.0.3.md)。
 
 ## 常见问题
 
