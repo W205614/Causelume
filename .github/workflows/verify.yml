@@ -9,8 +9,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -21,17 +21,17 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
           java-version: 21
           cache: maven
       - run: mvn -B -f backend/pom.xml verify
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.13"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
       - run: python -m pip install -r agent/requirements.txt
@@ -41,8 +41,8 @@ jobs:
   investigator:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.13"
       - run: python -m pip install -r agent/requirements.txt
@@ -56,7 +56,7 @@ jobs:
   deployment:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - run: python scripts/test_image_identity.py
       - run: python scripts/init_env.py
       - run: docker compose --profile holmes config --quiet
@@ -68,8 +68,8 @@ jobs:
       - name: Record published-image scan baseline
         run: |
           mkdir -p /tmp/image-scan
-          docker save "$(docker compose images -q app)" -o /tmp/image-scan/app-before.tar
-          docker save "$(docker compose images -q agent)" -o /tmp/image-scan/agent-before.tar
+          docker save "$(docker inspect --format '{{.Config.Image}}' "$(docker compose ps -q app)")" -o /tmp/image-scan/app-before.tar
+          docker save "$(docker inspect --format '{{.Config.Image}}' "$(docker compose ps -q agent)")" -o /tmp/image-scan/agent-before.tar
           for image in app agent; do
             docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v /tmp/image-scan:/scan aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}-before.tar --format json --output /scan/${image}-before.json --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
           done
@@ -88,7 +88,7 @@ jobs:
             docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy -v /tmp/image-scan:/scan aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb image --input /scan/${image}.tar --format json --output /scan/${image}.json --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --exit-code 1 || failed=1
           done
           exit "$failed"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: candidate-image-scan
@@ -97,15 +97,15 @@ jobs:
   postgres:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
           java-version: 21
           cache: maven
       - run: python scripts/verify_postgres.py
       - run: mvn -B -f backend/pom.xml -DskipTests package
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.13'
       - run: python -m pip install -r agent/requirements.txt
@@ -118,8 +118,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.13"
       - run: python -m pip install -r agent/requirements.txt
@@ -130,11 +130,11 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.13"
       - run: npm ci && npm audit --audit-level=high
