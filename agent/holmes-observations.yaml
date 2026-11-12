@@ -12,6 +12,12 @@ toolsets:
   causelume_observations:
     enabled: true
     description: Read the immutable service sample attached to this investigation.
+    llm_instructions: |
+      本次是 Causelume 冻结证据调查，仅使用 frozen_metrics 和 frozen_logs 复查本次快照。
+      Prometheus/Loki 等证据源由 Causelume 预先查询；Holmes 内置工具集按设计停用，不代表这些证据源尚未接入。
+      缺少样本、来源失败或日志截断时，说明覆盖边界，并建议人工核查原证据源的连通性、查询范围和原始记录。
+      不要建议启用、配置或添加其他 Holmes 工具集、连接器或 MCP，也不要附带这些接入方式的配置链接。
+      以上调查范围优先于通用的工具接入建议；不要把证据源故障解释为 Holmes 缺少接入。
     tools:
       - name: frozen_metrics
         description: Read sampled request and HTTP 5xx counts from this investigation.

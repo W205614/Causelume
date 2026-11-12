@@ -29,6 +29,10 @@ Java 绑定服务的数据源、`service` 和 `environment` 标签，并创建�
 
 `AGENT_MODE=offline` 使用本地规则。启用 `holmes` 还要求每次请求由 Java 明确传入 `allowModel:true`。缺少授权立即返回 422，在读取任何日志或联系模型前终止。调用目标固定为独立 HolmesGPT 0.46.0。其唯一启用的工具集 `causelume_observations` 只提供只读的 `frozen_metrics` 与 `frozen_logs`。
 
+`holmes-observations.yaml` 的 `llm_instructions` 明确本次只分析已采集的冻结证据。来源失败、无样本或日志截断应提示人工核查原证据源，避免将按设计停用的 Holmes 内置工具误判为未接入，并附带无关的接入建议。断网协议测试检查这些约束实际进入模型请求，不将其视为真实模型输出质量保证。
+
+该配置由 Compose 只读挂载到 Holmes；使用 main 的更新配置后，重启 Holmes 即可加载，无需重建 app/agent 镜像。已发布的 v1.0.3 Tag 保留原配置；这项建议质量修正随 main 提供，不覆盖历史版本。应用侧 `promptVersion` 仍标识冻结请求格式，配置变更需同时结合实际 YAML 版本追溯。
+
 应用先核验已认证的 `GET /api/info?detail=full`，再调用 `POST /api/chat`。两份结构化视图随该次 HTTP 请求以 Base64URL 传输，每份 UTF-8 原文最多 1800 字节，任务摘要最多 6144 字节。工具只解码请求内的冻结视图，没有访问源端的令牌或动态 URL。工具头在 shell 渲染前通过 URL 编码，解码时严格检查 Base64 字符。每次成功调用保存来源、调用 ID 与完整输出，且逐字核对实际返回值与本次快照。来源或内容不匹配会使调查失败。[上游头部传递](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/docs/data-sources/header-propagation.md) · [工具返回契约](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/holmes/core/models.py)
 
 模型配置使用 `holmes-observations.yaml`。`gpt-6.1-sol` 通过 `LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES=true` 走官方 Responses API。生产部署使用 `max_steps: 4`、`OVERRIDE_MAX_CONTENT_SIZE=16384`、`OVERRIDE_MAX_OUTPUT_TOKEN=1200` 和 `ENABLE_CONVERSATION_HISTORY_COMPACTION=false`。上下文预算包含上游框架提示和工具响应。源响应每项上限 128 KiB、Holmes 响应上限 512 KiB；最多保存 2 项初始证据、8 项实际调用结果和 3 段各不超过 2000 个码点的建议。[OpenAI 模型文档](https://developers.openai.com/api/docs/models/gpt-6.1-sol) · [Holmes 用量和上下文实现](https://github.com/HolmesGPT/holmesgpt/blob/0.46.0/holmes/core/llm.py)

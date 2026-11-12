@@ -18,12 +18,17 @@ import yaml
 def verify():
     model_requests = []
     reject_provider = False
+    frozen_instructions = None
 
     class Model(BaseHTTPRequestHandler):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             assert body["max_output_tokens"] == 1200
             assert self.path == "/v1/responses" and body["model"] == "gpt-6.1-sol"
+            system_messages = [item for item in body["input"] if item.get("role") in ("system", "developer")]
+            rendered_instructions = json.dumps([body.get("instructions"), *system_messages], ensure_ascii=False)
+            for instruction in frozen_instructions.splitlines():
+                assert instruction in rendered_instructions, "Frozen-evidence scope did not reach the model system instructions"
             model_requests.append(body)
             if reject_provider:
                 data = b'{"error":{"message":"Synthetic provider unavailable","type":"server_error"}}'
@@ -53,6 +58,8 @@ def verify():
     with ThreadingHTTPServer(("127.0.0.1", 0), Model) as model, tempfile.TemporaryDirectory() as folder:
         threading.Thread(target=model.serve_forever, daemon=True).start()
         config = yaml.safe_load(Path(__file__).with_name("holmes-observations.yaml").read_text())
+        frozen_instructions = config["toolsets"]["causelume_observations"]["llm_instructions"].strip()
+        assert frozen_instructions
         assert config["api_base"] == "https://api.openai.com/v1"
         config["api_base"] = f"http://127.0.0.1:{model.server_port}/v1"
         Path(folder, "config.yaml").write_text(yaml.safe_dump(config))
@@ -102,6 +109,7 @@ def verify():
             recovered = {call["tool_name"]: call["result"]["data"] for call in calls}
             assert recovered == dict(zip(("frozen_metrics", "frozen_logs"), views)), recovered
             assert all(call["result"]["status"] == "success" for call in calls)
+            print("Verified configured frozen-evidence scope reaches both model turns.", flush=True)
             marker = Path(folder, "unexpected-execution")
             injected = f"'; touch {marker}; echo '"
             calls = chat(injected, base64.urlsafe_b64encode(views[1].encode()).decode().rstrip("="))["tool_calls"]
