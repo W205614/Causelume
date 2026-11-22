@@ -3,7 +3,7 @@
 Causelume source is MIT licensed. This does not relicense the runtime, operating
 system, or dependencies. No third-party source is modified by Causelume. The
 Dockerfiles remove build/package-management files and apply the documented
-Alpine zlib package updates; the upstream package patches and build recipes are
+Alpine runtime package updates; the upstream package patches and build recipes are
 included in the source bundle.
 
 The release matching the image's `org.opencontainers.image.version` label provides
