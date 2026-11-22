@@ -114,19 +114,33 @@ def selector(labels):
 
 def check_profile(profile, labels):
     match = selector(labels)
+    end = datetime.now(timezone.utc).replace(microsecond=0)
+    start = end - timedelta(minutes=5)
+
     def check(kind):
+        checked = {"source": kind, "checkedAt": end.isoformat()}
         if kind == PROM:
-            path, params = "/api/v1/query", {"query": f"up{{{match}}}", "limit": 1, "timeout": "2s"}
+            path, params = "/api/v1/query", {
+                "query": f"up{{{match}}}", "time": checked["checkedAt"], "limit": 1, "timeout": "2s"}
         else:
-            path, params = "/loki/api/v1/query_range", {"query": "{" + match + "}", "limit": 1, "since": "1m"}
+            checked.update(windowStart=start.isoformat(), windowEnd=end.isoformat())
+            path, params = "/loki/api/v1/query_range", {
+                "query": "{" + match + "}", "limit": 1,
+                "start": int(start.timestamp()) * 10**9, "end": int(end.timestamp()) * 10**9}
         try:
             result = get_json(profile[kind], path, params)
             expected = "vector" if kind == PROM else "streams"
-            if not isinstance(result.get("data"), dict) or result["data"].get("resultType") != expected:
+            data = result.get("data")
+            if not isinstance(data, dict) or data.get("resultType") != expected or not isinstance(data.get("result"), list):
                 raise SourceError("查询返回结构无效")
-            return {"source": kind, "status": "ok", "detail": "只读查询成功"}
+            if kind == LOKI and any(not isinstance(row, dict) or not isinstance(row.get("values"), list)
+                                    for row in data["result"]):
+                raise SourceError("日志流结构无效")
+            found = bool(data["result"]) if kind == PROM else any(row["values"] for row in data["result"])
+            return {**checked, "status": "ok", "sampleStatus": "present" if found else "empty",
+                    "detail": "查询成功，有匹配样本" if found else "查询成功，当前范围无匹配样本"}
         except SourceError as exc:
-            return {"source": kind, "status": "error", "detail": str(exc)}
+            return {**checked, "status": "error", "sampleStatus": "unavailable", "detail": str(exc)}
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         return list(executor.map(check, (PROM, LOKI)))

@@ -15,6 +15,8 @@ const paths = {
   tasks: "M4 12h5l3-8 3 16 3-8h3",
   notifications: "M5 17h14l-2-3V8a5 5 0 0 0-10 0v6z M10 20h4",
   budget: "M3 5h18v15H3z M3 9h18 M15 13h3",
+  improvements: "M4 4h16v16H4z M8 12l3 3 5-6",
+  recovery: "M4 5h16v14H4z M8 9h8 M8 14h4 M15 15l2 2 3-4",
   account: "M12 3 3 7v6c0 5 9 8 9 8s9-3 9-8V7z M9 12l2 2 4-4",
   users:
     "M5 20v-2a5 5 0 0 1 10 0v2 M14 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0z M17 4a4 4 0 0 1 0 8 M18 15a4 4 0 0 1 3 4",
@@ -33,10 +35,12 @@ export const pages = {
   alerts: "告警中心",
   tickets: "事件与工单",
   tasks: "Agent 调查",
+  improvements: "我的改进事项",
   users: "用户管理",
   account: "账户安全",
   notifications: "通知中心",
   budget: "模型预算",
+  recovery: "备份与恢复",
 };
 const labels = {
   OPEN: "待分派",
@@ -52,6 +56,7 @@ const labels = {
   WARNING: "警告",
   INFO: "提示",
   ASSIGN: "分派",
+  REASSIGN: "转派工单",
   START: "开始处理",
   VERIFY: "验证恢复",
   CLOSE: "关闭并复盘",
@@ -128,6 +133,9 @@ function ticketTable(tickets) {
     ]),
   );
 }
+const workLabels = { mine: "我的待处理", unassigned: "未分派", recovery: "待验证恢复" };
+const sourceLabels = { prometheus: "Prometheus", loki: "Loki", checkout: "checkout" };
+export const sourceLabel = (source) => sourceLabels[source] || source;
 const navLink = (page, title) =>
   '<a href="#' + esc(page) + '">' + esc(title) + " →</a>";
 const metric = (num, title, href, key) =>
@@ -192,6 +200,17 @@ export function overview({ summary: s }) {
     .join("");
   return (
     header("运维概览", button("newTicket", "＋ 创建工单", true)) +
+    '<div class="work-items">' +
+    (s.workItems ? Object.keys(workLabels).map(scope => {
+      const result = s.workItems[scope];
+      return panel(workLabels[scope] + " · " + result.total,
+        result.items.length ? '<ul class="work-list">' + result.items.map(t =>
+          '<li><a href="#tickets/' + t.id + '">' + esc(t.title) + '</a><span>' +
+          esc(t.priority) + ' · ' + esc(t.serviceName) + '</span></li>').join("") + '</ul>'
+          : '<p class="empty">暂无待办</p>',
+        navLink("tickets?scope=" + scope, "查看全部" + workLabels[scope]));
+    }).join("") : "") +
+    '</div>' +
     '<div class="metrics">' +
     metric(s.openTickets, "未关闭工单", "tickets", "tickets") +
     metric(s.criticalAlerts, "严重告警", "alerts?severity=CRITICAL", "alerts") +
@@ -301,7 +320,8 @@ function filters(group, data) {
     '<form class="filters" data-filter>' +
     fields.join("") +
     "<button>筛选</button>" +
-    navLink(group, "清除筛选") +
+    navLink(group + (group === "tickets" && params.has("scope")
+      ? "?scope=" + encodeURIComponent(params.get("scope")) : ""), "清除筛选") +
     "</form>"
   );
 }
@@ -338,19 +358,37 @@ export function ticketsPage(data) {
       esc(t.title) +
       "</a></div>",
     esc(t.serviceName),
+    esc(t.priority),
     pill(t.status),
     esc(t.assigneeName || "待分派"),
     time(t.createdAt),
   ]);
   return (
-    header(pages.tickets, button("newTicket", "＋ 创建工单", true)) +
+    header(workLabels[data.params.get("scope")] || pages.tickets,
+      (data.params.has("scope") ? navLink("tickets", "全部工单") + " " : "") +
+      button("newTicket", "＋ 创建工单", true)) +
     filters("tickets", data) +
     panel(
       "工单列表",
-      table(["事件标题", "关联服务", "状态", "处理人", "创建时间"], rows) +
+      table(["事件标题", "关联服务", "优先级", "状态", "处理人", "创建时间"], rows) +
         pagination("tickets", data),
     )
   );
+}
+export function improvementsPage(data) {
+  const today = new Date();
+  const localDate = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const done = data.params.get("status") === "DONE";
+  const rows = data.page.items.map(item => [
+    '<a href="#tickets/' + item.ticketId + '?improvementId=' + item.id + '">' + esc(item.title) + '</a>',
+    esc(item.ticketTitle),
+    esc(item.dueDate),
+    item.status === "DONE" ? "已完成" : item.dueDate < localDate ? "已逾期" : "待完成",
+  ]);
+  return header(pages.improvements, navLink(done ? "improvements" : "improvements?status=DONE",
+    done ? "查看未完成" : "查看已完成")) +
+    panel(done ? "已完成" : "未完成",
+      table(["事项", "原工单", "截止日期", "状态"], rows) + pagination("improvements", data));
 }
 export function servicesPage({ services, admin }) {
   return (
@@ -515,7 +553,8 @@ export function taskDetail(t, { tickets, admin, actorId }) {
   let evidence = "",
     analysis = "";
   if (r) {
-    const samples = r.evidence
+    const samples = (r.observations ? r.evidence.filter(e => !Object.values(r.observations)
+      .some(source => source.source === e.source)) : r.evidence)
       .map(
         (e) =>
           '<li><span class="evidence-source">' +
@@ -525,19 +564,44 @@ export function taskDetail(t, { tickets, admin, actorId }) {
           "</p></li>",
       )
       .join("");
+    const sources = Object.values(r.observations || {}).map(source => {
+      const state = { ok: "有样本", empty: "无样本", error: "查询失败", pending: "等待窗口开始" }[source.status];
+      const details = source.source === "prometheus"
+        ? source.samples.map(sample => esc(({ min_up: "采集状态", requests: "请求增量", errors: "5xx 增量",
+          mean_seconds: "平均响应（秒）" })[sample.signal] || sample.signal) + " " + esc(sample.value)).join(" · ")
+        : source.samples.map(sample => [
+          time(Number(BigInt(sample.timestampNs) / 1000000n)), esc(sample.level), esc(sample.event),
+          sample.status ? "HTTP " + esc(sample.status) : "",
+          sample.duration_ms != null ? esc(sample.duration_ms) + " ms" : "",
+        ].filter(Boolean).join(" · ")).join("<br>");
+      return '<li><span class="evidence-source">' + esc(sourceLabel(source.source)) + '</span><strong>　' +
+        esc(state || source.status) + (source.truncated ? " · 采样截断" : "") +
+        (source.completeness === "partial" && !source.truncated && source.status === "ok" ? " · 证据不完整" : "") +
+        "</strong>" + (source.error ? "<p>" + esc(source.error) + "</p>" : "") +
+        (details ? "<p>" + details + "</p>" : "") + "</li>";
+    }).join("");
     const snapshot = [
       r.sampledAt ? "采样于 " + time(r.sampledAt) : "",
       r.snapshotId ? "快照 " + esc(r.snapshotId) : "",
     ]
       .filter(Boolean)
       .join("　");
+    const showRequested = r.requestedRange &&
+      (r.requestedRange.start !== r.effectiveRange?.start || r.requestedRange.end !== r.effectiveRange?.end);
+    const warning = {
+      partial: "证据不完整，请核对缺失的数据源和已截断的样本。",
+      empty: "本次查询未取得样本，请核对服务标签和时间范围。",
+    }[r.completeness];
     evidence = panel(
       "现场证据",
       (snapshot ? '<div class="snapshot">' + snapshot + "</div>" : "") +
-      (r.windowStart ? '<div class="snapshot">查询范围 ' + time(r.windowStart) + ' — ' + time(r.windowEnd) + '</div>' : "") +
-      (r.completeness && r.completeness !== "complete" ? '<p class="retry">证据完整性 ' + esc(r.completeness) + '。请核对缺失的数据源与截断记录。</p>' : "") +
+      (t.sourceId === "checkout-demo" ? '<div class="snapshot">近期快照</div>' : "") +
+      (showRequested ? '<div class="snapshot">请求范围 ' + time(r.requestedRange.start) + ' — ' + time(r.requestedRange.end) + '</div>' : "") +
+      (r.windowStart ? '<div class="snapshot">' + (showRequested ? "实际查询范围 " : "查询范围 ") +
+        time(r.windowStart) + ' — ' + time(r.windowEnd) + '</div>' : "") +
+      (warning ? '<p class="retry">' + warning + '</p>' : "") +
         '<ol class="evidence">' +
-        (samples || "<li>未取得证据</li>") +
+        (sources + samples || "<li>未取得证据</li>") +
         "</ol>",
     );
     analysis = panel(
@@ -579,7 +643,11 @@ export function taskDetail(t, { tickets, admin, actorId }) {
     (events ? '<div class="stage-times">' + events + "</div>" : "") +
     error +
     (r?.limitation ? '<p class="retry">' + esc(r.limitation) + '</p>' : "") +
-    (r?.usage ? '<div class="snapshot">模型 ' + esc(r.usage.model || "未调用") + ' · 模板 ' + esc(r.usage.promptVersion || "未知") +
+    (r?.modelExecution ? '<p class="snapshot">模型执行：' + esc({
+      called: "已调用", offline: "离线模式，未调用", skipped_no_evidence: "无可用证据，已跳过",
+    }[r.modelExecution] || r.modelExecution) + '</p>' : "") +
+    (r?.usage && (!r.modelExecution || r.modelExecution === "called") ?
+      '<div class="snapshot">模型 ' + esc(r.usage.model || "未调用") + ' · 模板 ' + esc(r.usage.promptVersion || "未知") +
       ' · 输入 token ' + esc(r.usage.inputTokens ?? "未知") + ' · 输出 token ' + esc(r.usage.outputTokens ?? "未知") +
       ' · 费用 $' + esc(r.usage.costUsd ?? "待供应商核对") + '</div>' : "") +
     pending +
@@ -606,6 +674,8 @@ export function detail(
     next && canAdvance ? button("action:" + next, label(next), true) : "";
   if (admin && t.status === "ASSIGNED")
     actions += button("action:ASSIGN", "改派");
+  if (admin && t.status === "PROCESSING")
+    actions += button("action:REASSIGN", "转派工单");
   if (next) actions += button("action:NOTE", "添加记录");
   if (admin || actorId === t.assigneeId) {
     if (t.status !== "CLOSED") actions += button("priority", "优先级");
@@ -663,7 +733,7 @@ export function detail(
     panel("工单信息", about + '<div class="pad">优先级 ' + esc(t.priority || "P3") + ' · 恢复验证 ' + esc(t.verification || "尚未记录") + '</div>') +
     (t.impact ? panel("结构化复盘", '<div class="pad"><p>影响范围 ' + esc(t.impact) + '</p><p>发生 ' + time(t.incidentStartedAt) +
       ' · 恢复 ' + time(t.incidentEndedAt) + '</p><h3>原因</h3><p>' + esc(t.cause) + '</p><h3>不确定性</h3><p>' + esc(t.uncertainty) + '</p></div>') : "") +
-    panel("改进事项", '<div class="pad">' + (t.improvements || []).map(item => '<p>' + esc(item.title) + ' · ' + esc(item.status) + ' · 负责人 #' + esc(item.ownerId) + ' · 截止 ' + esc(item.dueDate) +
+    panel("改进事项", '<div class="pad">' + (t.improvements || []).map(item => '<p id="improvement-' + item.id + '" tabindex="-1">' + esc(item.title) + ' · ' + (item.status === "DONE" ? "已完成" : "待完成") + ' · 负责人 ' + esc(users.find(user => user.id === item.ownerId)?.username || item.ownerId) + ' · 截止 ' + esc(item.dueDate) +
       (item.status !== "DONE" && (admin || actorId === t.assigneeId || actorId === item.ownerId) ? button("improvementDone:" + item.id, "标记完成") : "") + '</p>').join("") + '</div>') +
     panel(
       "关联调查",

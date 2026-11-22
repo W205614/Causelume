@@ -5,6 +5,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.transaction.annotation.Transactional;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -40,7 +41,9 @@ class BrowseTest {
         assertEquals("saved summary", item.get("summary"));
         assertFalse(item.containsKey("analysis"));
         assertFalse(item.containsKey("result"));
-        var overview = browse.overview();
+        var request=new MockHttpServletRequest();
+        request.setAttribute("currentActor",new Actor(1L,"admin","ADMIN",null,false,false,0));
+        var overview = browse.overview(request);
         assertEquals(3L, overview.get("openTickets"));
         assertEquals(1L, overview.get("activeTasks"));
         assertEquals(1L, ((Map<?,?>)overview.get("taskCounts")).get("PENDING"));

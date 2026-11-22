@@ -1,4 +1,4 @@
-import { productAction, notificationsPage, budgetPage } from "./product.js";
+import { productAction, notificationsPage, budgetPage, recoveryPage } from "./product.js";
 import { accountPage, accountAction, clearAccountSecrets } from "./account.js";
 import { demo, request as apiRequest, exportTicket } from "./api.js";
 import {
@@ -17,6 +17,7 @@ import {
   detail,
   taskDetail,
   taskRows,
+  improvementsPage,
 } from "./views.js";
 const root = document.querySelector("#app"),
   dialog = document.querySelector("#dialog");
@@ -86,7 +87,7 @@ function shell(page) {
     brand +
     '<nav aria-label="主导航">' +
     Object.entries(pages)
-      .filter(([key]) => (key !== "budget" || me.role === "ADMIN") && (!me.enrollmentRequired || key === "account"))
+      .filter(([key]) => (!["budget", "recovery"].includes(key) || me.role === "ADMIN") && (!me.enrollmentRequired || key === "account"))
       .map(
         ([key, title]) =>
           '<a href="#' +
@@ -116,11 +117,14 @@ async function loadView(page, id, params) {
   if (page === "account") return { ...state, me };
   if (page === "notifications") return { ...state, notifications: await request("/notifications" + (params.size ? "?" + params : "")) };
   if (page === "budget") return { ...state, budget: await request("/budget") };
+  if (page === "recovery") return { ...state, recovery: await request("/recovery/status") };
   const list = async (name) =>
     request("/" + name + "/page?" + params.toString());
   switch (page) {
     case "overview":
       return { ...state, summary: await request("/overview") };
+    case "improvements":
+      return { ...state, page: await list("improvements") };
     case "services": {
       const services = await request("/services");
       if (!id) return { ...state, services };
@@ -251,6 +255,8 @@ async function render() {
     const views = {
       notifications: notificationsPage,
       budget: budgetPage,
+      recovery: recoveryPage,
+      improvements: improvementsPage,
       account: () => accountPage(me),
       overview,
       services: servicesPage,
@@ -266,6 +272,10 @@ async function render() {
         : data.service
           ? observations(data.service, data.metrics, data.logs)
           : views[page](data);
+    if (ticket && params.has("improvementId")) {
+      const item = document.getElementById("improvement-" + params.get("improvementId"));
+      if (item) item.focus();
+    }
     for (const segment of main.querySelectorAll(".track [data-count]"))
       segment.style.flexGrow = segment.dataset.count;
     const filters = main.querySelector("form[data-filter]");
@@ -277,6 +287,8 @@ async function render() {
           if (value.trim()) query.set(key, value.trim());
         if (page === "tasks" && params.has("ticketId"))
           query.set("ticketId", params.get("ticketId"));
+        if (page === "tickets" && params.has("scope"))
+          query.set("scope", params.get("scope"));
         location.hash = page + (query.size ? "?" + query : "");
       };
     scheduleUpdates(page, id, params, version);
@@ -295,15 +307,15 @@ const input = (key, name, type = "text", value = "") =>
   key +
   '" type="' +
   type +
-  '" value="' +
+  '"' + (type === "datetime-local" ? ' step="0.001"' : "") + ' value="' +
   esc(value) +
   '" maxlength="250"></label>';
-const area = (key, name) =>
+const area = (key, name, maxLength = 3000) =>
   "<label>" +
   name +
   '<textarea required name="' +
   key +
-  '" maxlength="3000"></textarea></label>';
+  '" maxlength="' + maxLength + '"></textarea></label>';
 const select = (key, name, options, chosen) =>
   "<label>" +
   name +
@@ -503,11 +515,12 @@ root.onclick = async (e) => {
   if (op === "action") {
     let reviewed = ticket;
     const fields =
-      arg === "ASSIGN"
+      arg === "ASSIGN" || arg === "REASSIGN"
         ? select(
             "assigneeId",
             "处理人",
-            data.users.map((u) => [u.id, u.username]),
+            data.users.filter(u => u.active !== false && (arg !== "REASSIGN" || u.id !== reviewed.assigneeId))
+              .map((u) => [u.id, u.username]),
           )
         : "";
     const verification = arg === "VERIFY" && !demo ? select("verification", "恢复检测结果", [
@@ -521,7 +534,8 @@ root.onclick = async (e) => {
       fields + verification + reviewFields +
         area(
           "note",
-          { VERIFY: "恢复验证依据", CLOSE: "复盘记录" }[arg] || "处理说明",
+          { VERIFY: "恢复验证依据", CLOSE: "复盘记录", REASSIGN: "交接说明" }[arg] || "处理说明",
+          arg === "REASSIGN" ? 1800 : 3000,
         ),
       async (f) => {
         const { impact, startedAt, endedAt, cause, uncertainty, ...values } = f;
@@ -596,17 +610,39 @@ root.onclick = async (e) => {
       },
     );
   if (op === "investigate") {
+    const currentTicket = ticket;
+    let preview;
+    try {
+      preview = await request("/tasks/preview?ticketId=" + currentTicket.id);
+    } catch (err) {
+      if (epoch === actionEpoch) reportLate(err.message);
+      return;
+    }
+    if (epoch !== actionEpoch) return;
+    const localTime = (instant) => {
+      const date = new Date(instant);
+      return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 23);
+    };
     const requestId = crypto.randomUUID();
     form(
       "发起只读调查",
-      "<p>调查结果将关联工单 #" +
-        ticket.id +
-        "，供人工核查。</p>" +
-        (demo
-          ? "<p>本次使用模拟数据。</p>"
-          : "<p>若服务端启用 HolmesGPT，确认后将调用模型，可能产生 API 费用。离线模式使用规则分析。</p>"),
-      async () => {
-        const t = await request("/tasks", { ticketId: ticket.id, requestId });
+      "<p>服务 " + esc(preview.service) + " · 环境 " + esc(preview.environment) +
+        " · " + esc(label(preview.mode)) + "</p>" +
+        (preview.recentSnapshot
+          ? "<p>本次读取近期快照，范围由样例服务当前保留的请求决定。</p>"
+          : input("windowStart", "查询开始（本地时间）", "datetime-local", localTime(preview.windowStart)) +
+            input("windowEnd", "查询结束（本地时间）", "datetime-local", localTime(preview.windowEnd)) +
+            "<p>最长一小时。尚未发生的时段会在结果中注明。</p>") +
+        (preview.mode === "holmes" ? "<p>有可用证据时会调用模型，可能产生 API 费用。</p>" : ""),
+      async (fields) => {
+        const payload = { ticketId: currentTicket.id, requestId, serviceVersion: preview.serviceVersion };
+        if (!preview.recentSnapshot) {
+          const start = new Date(fields.windowStart), end = new Date(fields.windowEnd);
+          if (!(end > start) || end - start > 3600000) throw Error("请填写有效的起止时间，范围最长一小时。");
+          payload.windowStart = start.toISOString();
+          payload.windowEnd = end.toISOString();
+        }
+        const t = await request("/tasks", payload);
         return "tasks/" + t.id;
       },
     );

@@ -71,21 +71,28 @@ class Tickets {
         var ticket=store.one("select status,assignee_id,version,priority,verification from tickets where id=?",id);
         if(input.version==null || input.version<0) throw new Problem(400,"需要有效的工单版本");
         if(!input.version.equals(ticket.get("version"))) throw new Problem(409,"工单已更新，请刷新");
-        String note=Problem.text(input.note,2000,"note");
         String status=(String)ticket.get("status");
         Long assignee=(Long)ticket.get("assigneeId");
         String action=Problem.text(input.action,16,"action");
+        String note=Problem.text(input.note,action.equals("REASSIGN") ? 1800 : 2000,"note");
         String priority=(String)ticket.get("priority"), verification=(String)ticket.get("verification");
         if(!action.equals("ASSIGN") && !action.equals("NOTE") && !actor.role().equals("ADMIN") && !Objects.equals(assignee,actor.id()))
             throw new Problem(403,"需要工单负责人或管理员权限");
         String next=switch(action) {
-            case "ASSIGN" -> {
+            case "ASSIGN","REASSIGN" -> {
                 actor.admin();
-                if(!status.equals("OPEN") && !status.equals("ASSIGNED")) throw new Problem(409,"当前状态不能派工");
+                boolean handover=action.equals("REASSIGN");
+                if(handover ? !status.equals("PROCESSING") : !status.equals("OPEN") && !status.equals("ASSIGNED"))
+                    throw new Problem(409,"当前状态不能执行此派工动作");
                 if(input.assigneeId==null) throw new Problem(400,"请选择负责人");
-                store.one("select id from accounts where id=? and active=true",input.assigneeId);
+                var nextOwner=store.one("select username from accounts where id=? and active=true",input.assigneeId);
+                if(handover){
+                    if(input.assigneeId.equals(assignee)) throw new Problem(400,"请选择另一位负责人");
+                    var previousOwner=store.one("select username from accounts where id=?",assignee);
+                    note="负责人 "+previousOwner.get("username")+" → "+nextOwner.get("username")+"\n交接说明："+note;
+                }
                 assignee=input.assigneeId;
-                yield "ASSIGNED";
+                yield handover ? status : "ASSIGNED";
             }
             case "START" -> transition(status,"ASSIGNED","PROCESSING");
             case "VERIFY" -> {
@@ -122,7 +129,9 @@ class Tickets {
         }
         String outcome=switch(action){case "VERIFY" -> verification; case "PRIORITY" -> priority; default -> null;};
         record(id,action,note,actor,outcome);
-        if(action.equals("ASSIGN") || action.equals("CLOSE"))
+        if(action.equals("REASSIGN"))
+            notifications.notifyTicket(id,action,"处理中工单 #"+id+" 已转派给你，请查看交接说明");
+        else if(action.equals("ASSIGN") || action.equals("CLOSE"))
             notifications.notifyTicket(id,action,action.equals("ASSIGN") ? "工单 #"+id+" 已派给你" : "工单 #"+id+" 已关闭");
         return detail(id);
     }

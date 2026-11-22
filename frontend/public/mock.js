@@ -176,6 +176,27 @@ export async function request(path, body) {
   const [group, id, operation] = pathname.split("/");
   const serviceName = (row) =>
     services.find((s) => s.id === row.serviceId)?.name;
+  const work = (scope) => tickets.filter(t => ({
+    mine: t.assigneeId === me.id && ["ASSIGNED", "PROCESSING"].includes(t.status),
+    unassigned: t.status === "OPEN" && !t.assigneeId,
+    recovery: false,
+  })[scope]).sort((a, b) => (a.priority || "P3").localeCompare(b.priority || "P3") ||
+    a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
+  if (pathname === "recovery/status") return { configured: false };
+  if (pathname === "tasks/preview") {
+    const item = tickets.find(t => t.id === Number(new URLSearchParams(query).get("ticketId")));
+    return { service: serviceName(item), environment: "demo", mode: "模拟数据", recentSnapshot: true };
+  }
+  if (group === "services" && operation === "source-check")
+    return { available: true, checks: [{ source: "checkout", status: "ok", checkedAt: now(), sampleStatus: "present" }] };
+  if (group === "improvements") {
+    const params = new URLSearchParams(query);
+    const page = Number(params.get("page") || 1), size = 20;
+    const items = tickets.flatMap(t => (t.improvements || []).map(i => ({ ...i, ticketId: t.id, ticketTitle: t.title })))
+      .filter(i => i.ownerId === me.id && i.status === (params.get("status") || "OPEN"))
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.id - b.id);
+    return { page, size, total: items.length, items: items.slice((page - 1) * size, page * size) };
+  }
   if (group === "overview") {
     const count = (rows, key, states) =>
       Object.fromEntries(
@@ -188,6 +209,12 @@ export async function request(path, body) {
         ["PENDING", "RUNNING"].includes(t.status),
       ).length,
       services: services.length,
+      workItems: Object.fromEntries(["mine", "unassigned", "recovery"].map(scope => {
+        const rows = work(scope);
+        return [scope, { total: rows.length, items: rows.slice(0, 5).map(t => ({
+          ...t, priority: t.priority || "P3", serviceName: serviceName(t),
+        })) }];
+      })),
       taskCounts: count(tasks, "status", [
         "PENDING",
         "RUNNING",
@@ -208,7 +235,8 @@ export async function request(path, body) {
     const params = new URLSearchParams(query),
       page = Number(params.get("page") || 1),
       size = Number(params.get("size") || 20);
-    const filtered = collection.filter(
+    const scoped = group === "tickets" && params.has("scope") ? work(params.get("scope")) : collection;
+    const filtered = scoped.filter(
       (row) =>
         ["status", "severity", "serviceId", "assigneeId", "ticketId"].every(
           (key) => {
@@ -256,6 +284,7 @@ export async function request(path, body) {
   if (operation === "actions") {
     const step = {
       ASSIGN: [item.status === "ASSIGNED" ? "ASSIGNED" : "OPEN", "ASSIGNED"],
+      REASSIGN: ["PROCESSING", "PROCESSING"],
       START: ["ASSIGNED", "PROCESSING"],
       VERIFY: ["PROCESSING", "VERIFIED"],
       CLOSE: ["VERIFIED", "CLOSED"],
@@ -263,7 +292,7 @@ export async function request(path, body) {
     if (item.version !== body.version || (step && step[0] !== item.status))
       throw Error("状态已变化，请刷新");
     if (step) item.status = step[1];
-    if (body.action === "ASSIGN") item.assigneeId = Number(body.assigneeId);
+    if (["ASSIGN", "REASSIGN"].includes(body.action)) item.assigneeId = Number(body.assigneeId);
     if (body.action === "CLOSE") item.review = body.note;
     item.version++;
     item.timeline.push({
@@ -273,6 +302,19 @@ export async function request(path, body) {
       createdAt: now(),
     });
     return item;
+  }
+  if (operation === "improvements") {
+    const items = item.improvements ||= [];
+    const itemId = Number(pathname.split("/")[3]);
+    if (itemId) {
+      const updated = items.find(i => i.id === itemId);
+      updated.status = body.status;
+      item.timeline.push({ action: "UPDATE_ITEM", actor: me.username, note: body.evidence, createdAt: now() });
+      return updated;
+    }
+    const added = { ...body, id: items.length + 1, status: "OPEN" };
+    items.push(added);
+    return added;
   }
   if (operation === "feedback") {
     item.feedback = body.feedback;

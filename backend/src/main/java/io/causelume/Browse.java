@@ -1,5 +1,6 @@
 package io.causelume;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api")
 @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 class Browse {
+    private static final String WORK_ORDER = "k.priority asc,k.created_at asc,k.id asc";
     static final Set<String> TICKET_STATES = Set.of("OPEN", "ASSIGNED", "PROCESSING", "VERIFIED", "CLOSED");
     static final Set<String> TASK_STATES = Set.of("PENDING", "RUNNING", "SUCCEEDED", "FAILED");
     static final Set<String> SEVERITIES = Set.of("INFO", "WARNING", "CRITICAL");
@@ -55,20 +57,26 @@ class Browse {
         long total = store.db.queryForObject("select count(*)" + from, Long.class, filters.values.toArray());
         filters.values.add(size);
         filters.values.add((long) (page - 1) * size);
-        var items = store.rows("select " + fields + from + " order by " + order + " desc limit ? offset ?", filters.values.toArray());
+        var items = store.rows("select " + fields + from + " order by " + order + " limit ? offset ?", filters.values.toArray());
         return new Page(items, total, page, size);
     }
 
     Page tickets(int page,int size,String status,Long serviceId,Long assigneeId,String q) {
-        return tickets(page,size,status,serviceId,assigneeId,q,null);
+        return tickets(page,size,status,serviceId,assigneeId,q,null,new Filters(),null);
     }
 
     @GetMapping("/tickets/page")
     public Page tickets(@RequestParam(defaultValue="1") int page, @RequestParam(defaultValue="20") int size,
                         @RequestParam(required=false) String status, @RequestParam(required=false) Long serviceId,
                         @RequestParam(required=false) Long assigneeId, @RequestParam(required=false) String q,
-                        @RequestParam(required=false) String priority) {
-        var filters = new Filters();
+                        @RequestParam(required=false) String priority, @RequestParam(required=false) String scope,
+                        HttpServletRequest req) {
+        return tickets(page,size,status,serviceId,assigneeId,q,priority,
+                scope==null ? new Filters() : workItems(scope,Access.actor(req)),scope);
+    }
+
+    private Page tickets(int page,int size,String status,Long serviceId,Long assigneeId,String q,
+                         String priority,Filters filters,String scope) {
         filters.id("k.service_id", serviceId);
         filters.id("k.assignee_id", assigneeId);
         filters.code("k.status", status, TICKET_STATES);
@@ -82,7 +90,30 @@ class Browse {
             filters.values.add(term);
             filters.values.add(term.startsWith("#") ? term.substring(1) : term);
         }
-        return query(TICKET_FIELDS, TICKET_FROM, "k.id", filters, page, size);
+        return query(TICKET_FIELDS, TICKET_FROM, scope==null ? "k.id desc" : WORK_ORDER, filters, page, size);
+    }
+
+    private Filters workItems(String scope,Actor actor) {
+        var filters=new Filters();
+        switch(scope) {
+            case "mine" -> {
+                filters.id("k.assignee_id",actor.id());
+                filters.clauses.add("k.status in ('ASSIGNED','PROCESSING')");
+            }
+            case "unassigned" -> filters.clauses.add("k.status='OPEN' and k.assignee_id is null");
+            case "recovery" -> {
+                if(!actor.role().equals("ADMIN")) filters.id("k.assignee_id",actor.id());
+                filters.clauses.add("""
+                    k.status in ('OPEN','ASSIGNED','PROCESSING')
+                    and (k.verification is null or k.verification<>'PASSED')
+                    and exists (select 1 from alerts a where a.id=k.alert_id and a.lifecycle_status='RESOLVED'
+                        and a.resolved_at is not null and not exists
+                            (select 1 from timeline h where h.ticket_id=k.id and h.action='REOPEN' and h.created_at>=a.resolved_at))
+                    """);
+            }
+            default -> throw new Problem(400,"未知的待办范围");
+        }
+        return filters;
     }
 
     @GetMapping("/alerts/page")
@@ -91,7 +122,7 @@ class Browse {
         var filters = new Filters();
         filters.id("a.service_id", serviceId);
         filters.code("a.severity", severity, SEVERITIES);
-        return query(ALERT_FIELDS, ALERT_FROM, "a.id", filters, page, size);
+        return query(ALERT_FIELDS, ALERT_FROM, "a.id desc", filters, page, size);
     }
 
     @GetMapping("/tasks/page")
@@ -102,7 +133,7 @@ class Browse {
         filters.id("t.ticket_id", ticketId);
         filters.id("k.service_id", serviceId);
         filters.code("t.status", status, TASK_STATES);
-        return query(TASK_FIELDS, TASK_FROM, "t.id", filters, page, size);
+        return query(TASK_FIELDS, TASK_FROM, "t.id desc", filters, page, size);
     }
 
     private Map<String, Long> counts(String table, String field, Set<String> keys) {
@@ -115,7 +146,8 @@ class Browse {
     }
 
     @GetMapping("/overview")
-    public Map<String,Object> overview() {
+    public Map<String,Object> overview(HttpServletRequest req) {
+        var actor=Access.actor(req);
         var alerts = counts("alerts", "severity", SEVERITIES);
         var tasks = counts("tasks", "status", TASK_STATES);
         return Map.of("openTickets", store.db.queryForObject("select count(*) from tickets where status<>'CLOSED'", Long.class),
@@ -123,6 +155,10 @@ class Browse {
             "services", store.db.queryForObject("select count(*) from services", Long.class),
             "alertCounts", alerts, "taskCounts", tasks,
             "recentTickets", store.rows("select " + TICKET_FIELDS + " from " + TICKET_FROM + " order by k.id desc limit 5"),
-            "recentAlerts", store.rows("select " + ALERT_FIELDS + " from " + ALERT_FROM + " order by a.id desc limit 5"));
+            "recentAlerts", store.rows("select " + ALERT_FIELDS + " from " + ALERT_FROM + " order by a.id desc limit 5"),
+            "workItems", Map.of(
+                "mine",query(TICKET_FIELDS,TICKET_FROM,WORK_ORDER,workItems("mine",actor),1,5),
+                "unassigned",query(TICKET_FIELDS,TICKET_FROM,WORK_ORDER,workItems("unassigned",actor),1,5),
+                "recovery",query(TICKET_FIELDS,TICKET_FROM,WORK_ORDER,workItems("recovery",actor),1,5)));
     }
 }

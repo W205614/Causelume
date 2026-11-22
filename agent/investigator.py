@@ -202,11 +202,15 @@ def create_app():
         if source_id == DEMO["id"]:
             try:
                 snap = read_json(demo_url + "/snapshot", evidence_token)
-                ok = isinstance(snap, dict) and snap.get("service") == request.args["service"] == "checkout"
+                ok = (isinstance(snap, dict) and snap.get("service") == request.args["service"] == "checkout"
+                      and type(snap.get("requests")) is int and 0 <= snap["requests"] <= 50)
                 checks.append({"source": "checkout", "status": "ok" if ok else "error",
-                               "detail": "已读取演示窗口" if ok else "演示源仅支持 checkout 标签"})
+                               "sampleStatus": ("present" if snap["requests"] else "empty") if ok else "unavailable",
+                               "checkedAt": snap.get("sampledAt") if ok else None,
+                               "detail": "已读取近期快照" if ok else "演示源仅支持 checkout 标签"})
             except HttpProblem as exc:
-                checks.append({"source": "checkout", "status": "error", "detail": exc.description})
+                checks.append({"source": "checkout", "status": "error", "sampleStatus": "unavailable",
+                               "detail": exc.description})
         else:
             checks = check_profile(profile, labels)
         return {"sourceId": source_id, "available": all(c["status"] == "ok" for c in checks), "checks": checks}

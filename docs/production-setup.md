@@ -6,8 +6,8 @@
 
 1. 安装维护中的 Linux、Python 3.13、Docker Engine 和 Compose v2，启用主机时间同步。工作目录设为 /opt/causelume。Python 用于配置初始化及发布脚本；运行 app/agent 镜像无需宿主 Java、Maven 或 Node。发布脚本还会从源码构建备份/恢复维护镜像，需保留完整源码及联网构建条件。
 2. 防火墙只向外开放 SSH（限制来源）及 80/443。PostgreSQL、Agent、Holmes、Prometheus、Loki、Alertmanager 与管理指标端口通过内部网络访问。
-3. 获取 `v1.0.3` Tag 或经过审核的其他版本完整源码，复制 production.env.example 为 production.env。以专用部署用户运行 `python scripts/init_production.py`。Linux 上 `secrets/` 权限为 0700，其他宿主用户无法遍历。内部凭据文件权限为 0444，Compose 按服务授权单独只读挂载，使容器中不同 UID 能读取所需文件。备份服务另有整个目录的归档权限。将该目录置于部署用户控制、未公开共享的路径下。
-4. v1.0.3 的 app、agent 已公开，无需登录或自行发布。下载 [Release 的 images.json](https://github.com/W205614/Causelume/releases/download/v1.0.3/images.json)，分别将 `images.app.version.registryReference`、`images.agent.version.registryReference` 填入 `APP_IMAGE`、`AGENT_IMAGE`，`APP_RELEASE` 填 `6dc18d68dfdaf62406e430a8296923fd5e25283f`。其他版本按其清单核对源码、摘要和扫描结果；不要把后续文档提交号当作镜像来源。
+3. 获取 `v1.1.0` Tag 或经过审核的其他版本完整源码，复制 production.env.example 为 production.env。以专用部署用户运行 `python scripts/init_production.py`。Linux 上 `secrets/` 权限为 0700，其他宿主用户无法遍历。内部凭据文件权限为 0444，Compose 按服务授权单独只读挂载，使容器中不同 UID 能读取所需文件。备份服务另有整个目录的归档权限。将该目录置于部署用户控制、未公开共享的路径下。
+4. 下载 [v1.1.0 的镜像清单](https://github.com/W205614/Causelume/releases/download/v1.1.0/images.json)。将 `images.app.version.registryReference`、`images.agent.version.registryReference` 分别填入 `APP_IMAGE`、`AGENT_IMAGE`，将清单中的 `commit` 填入 `APP_RELEASE`。部署其他版本时使用该版本 Release 的镜像清单。
 5. 编辑外部凭据及域名，先运行 Compose config --quiet，再使用 sh scripts/release.sh。部署依赖的角色、数据库和内部网络由配置创建。
 
 ~~~sh
@@ -104,6 +104,8 @@ systemctl list-timers 'causelume-*'
 ~~~
 
 启用后，用 `journalctl -u causelume-backup.service`、`journalctl -u causelume-restore.service` 检查结果，并验证机外服务的漏心跳通知。
+
+管理员可在控制台「备份与恢复」查看最近一次执行结果、最近一次成功时间和最后一次备份心跳发送状态。升级后，维护镜像需要按上面的命令重建，状态会在下一次维护任务完成后出现。生产 Compose 的 `recovery-status` 卷仅保存脱敏状态，应用以只读方式挂载。若备份距最后一次成功已超过 24 小时，页面会标记超期。实际漏报通知、收件人及整机断联由机外服务验收。
 
 ## 发布与升级
 

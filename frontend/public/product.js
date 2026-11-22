@@ -1,4 +1,4 @@
-import { esc } from "./views.js";
+import { esc, sourceLabel } from "./views.js";
 
 const field = (key, label, value = "", type = "text", required = false) =>
   '<label>' + label + '<input name="' + key + '" type="' + type + '" value="' + esc(value) + '"' +
@@ -9,6 +9,21 @@ const select = (key, label, options, value) =>
 const panel = (title, body) => '<section class="panel"><div class="pad"><h2>' + title + '</h2>' + body + '</div></section>';
 const button = (op, text) => '<button data-op="' + op + '">' + text + '</button>';
 const date = value => value ? esc(new Date(value).toLocaleString("zh-CN")) : "—";
+
+export function recoveryPage({ recovery }) {
+  const state = { NEVER_RUN: "尚未执行", SUCCEEDED: "成功", FAILED: "失败" };
+  const heartbeat = { NOT_CONFIGURED: "未配置", NOT_SENT: "未发送", SENT: "最后一次发送成功", FAILED: "最后一次发送失败" };
+  const report = (title, job) => panel(title,
+    "<p>最近一次结果 " + esc(state[job.result]) + " · " + date(job.finishedAt) + "</p>" +
+    "<p>最近一次成功 " + date(job.lastSuccessAt) + "</p>");
+  return '<div class="head"><h1>备份与恢复</h1>' + button("refresh", "刷新状态") + "</div>" +
+    (recovery.configured ? '<div class="overview-columns">' +
+      report("加密备份", recovery.backup) + report("隔离恢复演练", recovery.restore) +
+      panel("机外备份心跳", "<p>" + esc(heartbeat[recovery.heartbeat]) +
+        "。漏报通知由机外服务发送，请在该服务确认收件人和告警状态。</p>") + "</div>" +
+      (recovery.backupOverdue ? '<p role="alert" class="retry">最近一次备份成功距今已超过 24 小时。</p>' : "")
+      : panel("状态未配置", "<p>Linux 部署可通过维护任务提供备份和恢复状态。</p>"));
+}
 
 export function notificationsPage(data) {
   const delivery = data.params.get("scope") === "delivery";
@@ -84,7 +99,15 @@ export async function productAction(op, arg, context) {
   } else if (op === "sourceCheck") {
     const result = await request("/services/" + arg + "/source-check");
     if (!context.isCurrent()) return true;
-    form("连接检测", '<pre>' + esc(JSON.stringify(result, null, 2)) + '</pre>', async () => "services");
+    const checks = result.checks.map(check => {
+      const state = check.status === "error" ? "查询失败" :
+        { present: "查询成功，有匹配样本", empty: "查询成功，当前范围无匹配样本" }[check.sampleStatus] || "查询成功";
+      const window = check.windowStart ? date(check.windowStart) + " — " + date(check.windowEnd) : date(check.checkedAt);
+      return "<p><strong>" + esc(sourceLabel(check.source)) + " · " + state + "</strong><br>" + window +
+        (check.status === "error" ? "<br>" + esc(check.detail) : "") +
+        (check.sampleStatus === "empty" ? "<br>请核对环境、服务标签和时间范围。" : "") + "</p>";
+    }).join("");
+    form("连接检测", checks, async () => {});
   } else if (op === "maintenance") {
     form("维护静默", field("until", "静默截止时间", "", "datetime-local", true) + field("reason", "维护原因", "", "text", true),
       values => request("/services/" + arg + "/maintenance", { ...values, until: new Date(values.until).toISOString() }).then(() => "services"));
@@ -106,8 +129,8 @@ export async function productAction(op, arg, context) {
       select("ownerId", "负责人", data.users.filter(u => u.active !== false).map(u => [u.id, u.username]), me.id),
       values => request("/tickets/" + ticket.id + "/improvements", { ...values, ownerId: Number(values.ownerId) }).then(() => "tickets/" + ticket.id));
   } else if (op === "improvementDone") {
-    await request("/tickets/" + ticket.id + "/improvements/" + arg, { status: "DONE" });
-    if (context.isCurrent()) await context.render();
+    form("完成改进事项", '<label>完成依据<textarea name="evidence" required maxlength="1500"></textarea></label>',
+      values => request("/tickets/" + ticket.id + "/improvements/" + arg, { status: "DONE", ...values }));
   } else if (op === "userStatus") {
     const user = data.users.find(u => u.id === Number(arg));
     form(user.active === false ? "启用账号" : "停用账号", "<p>账号状态变化会撤销已有会话。</p>",

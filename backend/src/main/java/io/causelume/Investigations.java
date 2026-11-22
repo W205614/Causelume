@@ -1,9 +1,13 @@
 package io.causelume;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.core.env.Environment;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import tools.jackson.databind.ObjectMapper;
@@ -15,12 +19,14 @@ class Investigations {
     final Store store;
     final ObjectMapper json;
     final ModelBudgets budgets;
-    Investigations(Store store, ObjectMapper json, ModelBudgets budgets) {
+    final Environment env;
+    Investigations(Store store, ObjectMapper json, ModelBudgets budgets, Environment env) {
         this.store = store;
         this.json = json;
         this.budgets = budgets;
+        this.env = env;
     }
-    record NewTask(long ticketId, UUID requestId, java.time.Instant windowStart, java.time.Instant windowEnd) {
+    record NewTask(long ticketId, UUID requestId, Instant windowStart, Instant windowEnd, Long serviceVersion) {
         NewTask {
             // Match database rounding so pre-existing requests also remain replayable.
             if(windowStart!=null) windowStart=windowStart.plusNanos(500).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
@@ -28,6 +34,7 @@ class Investigations {
         }
     }
     record Feedback(String feedback, String rating) {}
+    record Window(Instant start, Instant end) {}
 
     @GetMapping
     List<Map<String,Object>> list(@RequestParam(required=false) Long ticketId) {
@@ -45,14 +52,36 @@ class Investigations {
         return result(store.one(SELECT+" where id=?",id));
     }
 
+    @GetMapping("/preview") @Transactional(readOnly=true)
+    Map<String,Object> preview(@RequestParam long ticketId,HttpServletRequest req) {
+        var ticket = store.one("select status,assignee_id,service_id,alert_id from tickets where id=?",ticketId);
+        IncidentRecords.requireOwner(Access.actor(req),ticket);
+        requireInvestigable(ticket);
+        var source = investigationSource(ticket);
+        boolean recentSnapshot = "checkout-demo".equals(source.get("sourceId"));
+        var view = new LinkedHashMap<String,Object>();
+        view.put("service",source.get("name"));
+        view.put("serviceLabel",source.get("serviceLabel"));
+        view.put("environment",source.get("environment"));
+        view.put("sourceId",source.get("sourceId"));
+        view.put("serviceVersion",source.get("version"));
+        view.put("mode",env.getProperty("AGENT_MODE","offline"));
+        view.put("recentSnapshot",recentSnapshot);
+        if (!recentSnapshot) {
+            var window = defaultWindow(ticket);
+            view.put("windowStart",window.start());
+            view.put("windowEnd",window.end());
+        }
+        return view;
+    }
+
     @PostMapping @Transactional
     public Object create(@RequestBody NewTask input, HttpServletRequest req) {
         var actor = Access.actor(req);
         if (input.requestId == null) throw new Problem(400,"需要 requestId");
         // Serialize requests for this ticket, including a concurrent verification or close.
         var ticket = store.one("select status,assignee_id,service_id,alert_id from tickets where id=? for update",input.ticketId);
-        if (!actor.role().equals("ADMIN") && !Long.valueOf(actor.id()).equals(ticket.get("assigneeId")))
-            throw new Problem(403,"需要工单负责人或管理员权限");
+        IncidentRecords.requireOwner(actor,ticket);
         var old = store.rows("select id,ticket_id,window_start,window_end from tasks where creator_id=? and request_id=?",actor.id(),input.requestId);
         if (!old.isEmpty()) {
             if (!Long.valueOf(input.ticketId).equals(old.getFirst().get("ticketId")))
@@ -66,31 +95,24 @@ class Investigations {
             }
             return get((long)original.get("id"));
         }
-        if (!List.of("ASSIGNED","PROCESSING").contains(ticket.get("status")))
-            throw new Problem(409,"调查需要已分派或处理中的工单");
+        requireInvestigable(ticket);
         if (!store.rows("select id from tasks where ticket_id=? and status in ('PENDING','RUNNING')",input.ticketId).isEmpty())
             throw new Problem(409,"此工单已有调查在进行");
         // Admissions on different tickets compete for the same finite worker queue.
         store.one("select id from task_admission where id=1 for update");
         if (store.db.queryForObject("select count(*) from tasks where status in ('PENDING','RUNNING')",Long.class) >= 32)
             throw new Problem(429,"待处理调查已达上限，请稍后再试");
-        var service=store.one("select name,source_id,service_label,environment,active from services where id=?",ticket.get("serviceId"));
-        if(!Boolean.TRUE.equals(service.get("active"))) throw new Problem(409,"服务已停用");
-        if(service.get("sourceId")==null) throw new Problem(422,"服务尚未绑定批准的数据源");
-        java.time.Instant end=input.windowEnd, start=input.windowStart;
+        var service=investigationSource(ticket);
+        if (input.serviceVersion!=null && !input.serviceVersion.equals(service.get("version")))
+            throw new Problem(409,"服务配置已更新，请重新打开调查确认");
+        Instant end=input.windowEnd, start=input.windowStart;
         if((start==null)!=(end==null)) throw new Problem(400,"时间范围需要同时填写起止时间");
         if(start==null) {
-            if(ticket.get("alertId")!=null) {
-                var at=store.one("select occurred_at from alerts where id=?",ticket.get("alertId")).get("occurredAt");
-                var occurred=((java.time.OffsetDateTime)at).toInstant();
-                start=occurred.minusSeconds(300);
-                end=occurred.plusSeconds(300);
-            } else {
-                end=java.time.Instant.now();
-                start=end.minusSeconds(600);
-            }
+            var window=defaultWindow(ticket);
+            start=window.start();
+            end=window.end();
         }
-        if(!start.isBefore(end) || java.time.Duration.between(start,end).compareTo(java.time.Duration.ofHours(1))>0)
+        if(!start.isBefore(end) || Duration.between(start,end).compareTo(Duration.ofHours(1))>0)
             throw new Problem(400,"调查时间范围必须大于零且不超过一小时");
         long id = store.insert("insert into tasks(ticket_id,creator_id,request_id,status,source_id,service_label,environment,window_start,window_end) values (?,?,?,'PENDING',?,?,?,?,?)",
                 input.ticketId,actor.id(),input.requestId,service.get("sourceId"),service.get("serviceLabel"),service.get("environment"),
@@ -99,6 +121,28 @@ class Investigations {
         store.audit(actor.username(),"CREATE_TASK",id);
         return get(id);
     }
+    private void requireInvestigable(Map<String,Object> ticket) {
+        if (!List.of("ASSIGNED","PROCESSING").contains(ticket.get("status")))
+            throw new Problem(409,"调查需要已分派或处理中的工单");
+    }
+
+    private Map<String,Object> investigationSource(Map<String,Object> ticket) {
+        var service=store.one("select name,source_id,service_label,environment,active,version from services where id=?",ticket.get("serviceId"));
+        if(!Boolean.TRUE.equals(service.get("active"))) throw new Problem(409,"服务已停用");
+        if(service.get("sourceId")==null) throw new Problem(422,"服务尚未绑定批准的数据源");
+        return service;
+    }
+
+    private Window defaultWindow(Map<String,Object> ticket) {
+        if(ticket.get("alertId")!=null) {
+            var alert=store.one("select occurred_at from alerts where id=?",ticket.get("alertId"));
+            var occurred=((java.time.OffsetDateTime)alert.get("occurredAt")).toInstant();
+            return new Window(occurred.minusSeconds(300),occurred.plusSeconds(300));
+        }
+        Instant end=Instant.now();
+        return new Window(end.minusSeconds(600),end);
+    }
+
     @PostMapping("/{id}/feedback") @Transactional
     public Object feedback(@PathVariable long id,@RequestBody Feedback input,HttpServletRequest req) {
         var actor = Access.actor(req);

@@ -33,4 +33,10 @@ test("演示控制台在桌面、平板、手机宽度下可导航和阅读", as
         fullPage: true,
       });
   }
+  await page.setViewportSize({ width: 1280, height: 690 });
+  const logout = page.getByRole("button", { name: "退出登录", exact: true });
+  await expect(logout).toBeInViewport({ ratio: 1 });
+  await page.getByRole("navigation").getByRole("link", { name: "备份与恢复" }).click();
+  await expect(page.getByRole("heading", { name: "备份与恢复", exact: true })).toBeVisible();
+  await expect(logout).toBeInViewport({ ratio: 1 });
 });

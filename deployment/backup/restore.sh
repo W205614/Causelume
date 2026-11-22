@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 umask 077
+. /usr/local/lib/causelume/recovery-status.sh
+if [ -n "${RECOVERY_STATUS_DIR:-}" ]; then
+  exec 9>"$RECOVERY_STATUS_DIR/restore.lock"
+  flock -n 9 || { printf '%s\n' 'Another recovery rehearsal is active.' >&2; exit 1; }
+fi
+result=FAILED
+trap 'write_recovery_status restore "$result" NOT_CONFIGURED' EXIT
 export RESTIC_PASSWORD_FILE=/run/secrets/RESTIC_PASSWORD
 if [ -s /run/secrets/AWS_ACCESS_KEY_ID ]; then
   export AWS_ACCESS_KEY_ID="$(cat /run/secrets/AWS_ACCESS_KEY_ID)"
@@ -15,10 +22,11 @@ test -s /restore/work/release.txt
 pg_restore -h restore-postgres -U causelume_migrator -d causelume --no-owner --no-acl --single-transaction --exit-on-error /restore/work/causelume.dump
 psql -h restore-postgres -U causelume_migrator -d causelume -v ON_ERROR_STOP=1 -c 'REVOKE INSERT, UPDATE, DELETE ON TABLE public.flyway_schema_history FROM causelume_app'
 export PGPASSWORD="$(cat /run/secrets/APP_DB_PASSWORD)"
-for table in accounts services alerts tickets tasks timeline audit; do
+for table in accounts services alerts tickets tasks timeline audit improvement_items; do
   pg_restore --data-only --table="$table" --file=/restore/table.sql /restore/work/causelume.dump
   expected="$(awk '/^COPY / {copy=1;next} copy && $0=="\\." {copy=0;next} copy {n++} END {print n+0}' /restore/table.sql)"
   actual="$(psql -h restore-postgres -U causelume_app -d causelume -Atc "select count(*) from $table")"
   test "$expected" = "$actual" || { printf '%s\n' "Restore row count mismatch: $table" >&2; exit 1; }
 done
+result=SUCCEEDED
 printf '%s\n' 'Restored encrypted release and matched table counts in the isolated database.'

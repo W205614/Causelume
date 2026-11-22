@@ -21,6 +21,7 @@ Web 页面和 /api 同源。POST 使用 application/json，登录成功后由容
 - 告警等级取 INFO、WARNING、CRITICAL。对同一服务、来源、外部事件 ID 的重投保留首条告警，包括服务后来停用的情况；停用服务仍不允许接收新事件。
 - 每条工单同时表示待调查事件和它的协作记录。一个告警至多关联一个工单。同一操作者的 requestId 重投返回已有工单，包括其服务后来停用的情况；请求内容冲突返回 409。停用服务仍不允许创建新工单。
 - OPEN → ASSIGNED → PROCESSING → VERIFIED → CLOSED 依次使用 ASSIGN、START、VERIFY、CLOSE。管理员可在 ASSIGNED 状态改派。VERIFY 的 note 记录人工恢复验证，CLOSE 的 note 存为复盘。未关闭时可用 NOTE 追加观察。
+- 管理员可用 `REASSIGN` 转派 `PROCESSING` 工单，提交当前 `version`、新 `assigneeId` 和交接说明 `note`。工单仍为 `PROCESSING`，时间线记录交接，站内通知发给新负责人。
 - 每次操作同时比较并递增 version，状态、审计和时间线在同一事务提交。并发写入返回 409 后需重新读取并审阅新记录。
 - 首次创建文件数据库时，通过环境注入 APP_ADMIN_PASSWORD 和 APP_OPERATOR_PASSWORD，分别初始化 admin 和 operator。新增密码至少 12 个字符、最多 72 个 UTF-8 字节，以 BCrypt 哈希存储。重启沿用已有账户。
 - APP_DB_URL 默认 `jdbc:h2:file:./data/causelume`。文件库适用于单实例部署，Flyway 在启动时按版本迁移。
@@ -28,6 +29,10 @@ Web 页面和 /api 同源。POST 使用 application/json，登录成功后由容
 执行 `mvn -f backend/pom.xml test` 运行真实 HTTP、数据库迁移、用户权限和工单流转集成测试。
 
 ## 调查与服务证据
+
+- `GET /api/tasks/preview?ticketId=…` 返回已分派或处理中的工单当前服务绑定、配置的模式、`serviceVersion` 和默认窗口。负责人或管理员可读取。checkout 的 `recentSnapshot=true` 表示取证范围由示例服务近期保留的记录决定。
+- `POST /api/tasks` 可携带预览的 `serviceVersion`。若服务配置已更新，返回 409 并要求重新确认。既有请求可继续省略该字段。
+- 管理员的 `GET /api/services/{id}/source-check` 仍用 `available` 表示各查询能成功完成，每项 `sampleStatus` 为 `present`、`empty` 或 `unavailable`。检查结果包含检查时间和适用的查询窗口。
 
 | 方法和路径 | 契约 |
 |---|---|
@@ -53,6 +58,10 @@ GET /api/tickets/page、/api/alerts/page、/api/tasks/page 共用从 1 开始的
 | tasks/page | ticketId、serviceId、status | 状态、工单标题、服务名、起止时间、错误代码、最多 240 字的摘要。旧记录可能没有摘要 |
 
 GET /api/tasks/{id} 返回单条调查完整分析、观察证据及反馈。GET /api/overview 从全库统计 openTickets、criticalAlerts、activeTasks、services、alertCounts、taskCounts，并附最近 5 条工单和告警。activeTasks 包含 PENDING 与 RUNNING。
+
+- `GET /api/overview` 同时返回 `workItems`，包含 `mine`、`unassigned`、`recovery` 三组分页摘要。每组最多 5 条，按优先级、创建时间、编号排序。用 `GET /api/tickets/page?scope=…` 查看完整分页。成员的恢复待办仅包含自己负责的工单。
+- `GET /api/improvements/page` 返回当前账号负责的改进事项，按截止日期排序。`status` 默认为 `OPEN`，可切换 `DONE`。完成时可在现有更新接口提交 `evidence`，保存到工单时间线。
+- 管理员可用 `GET /api/recovery/status` 查看维护脚本报告的备份、隔离恢复和备份心跳状态。未配置时返回 `configured=false`。
 
 旧数组入口 /api/tickets、/api/alerts、/api/tasks 最多返回最近 100 项。任务数组返回摘要；取证据的调用方应改用详情接口，浏览全部历史请用分页接口。
 

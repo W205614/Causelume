@@ -24,7 +24,21 @@ class IncidentRecords {
     }
 
     record Item(String title,Long ownerId,LocalDate dueDate){}
-    record Update(String status){}
+    record Update(String status,String evidence){}
+
+    @GetMapping("/improvements/page") @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    Browse.Page myItems(@RequestParam(defaultValue="OPEN") String status,
+                        @RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int size,
+                        HttpServletRequest req) {
+        var actor=Access.actor(req);
+        Problem.choice(status,Set.of("OPEN","DONE"),"status");
+        if(page<1 || size<1 || size>100) throw new Problem(400,"页码须为正，每页 1–100 条");
+        String from=" from improvement_items i join tickets k on k.id=i.ticket_id where i.owner_id=? and i.status=?";
+        long total=store.db.queryForObject("select count(*)"+from,Long.class,actor.id(),status);
+        var items=store.rows("select i.id,i.title,i.due_date,i.status,i.ticket_id,k.title as ticket_title"+from+
+            " order by i.due_date,i.id limit ? offset ?",actor.id(),status,size,(long)(page-1)*size);
+        return new Browse.Page(items,total,page,size);
+    }
     @PostMapping("/tickets/{id}/improvements") @Transactional
     public Object add(@PathVariable long id,@RequestBody Item in,HttpServletRequest req) {
         var actor=Access.actor(req);
@@ -44,9 +58,11 @@ class IncidentRecords {
         var row=store.one("select * from improvement_items where ticket_id=? and id=?",id,item);
         if(!Long.valueOf(actor.id()).equals(row.get("ownerId"))) requireOwner(actor,ticket);
         String status=Problem.choice(in.status(),Set.of("OPEN","DONE"),"status");
+        String evidence=in.evidence()==null ? null : Problem.text(in.evidence(),1500,"完成依据");
+        if(evidence!=null && !status.equals("DONE")) throw new Problem(400,"完成依据仅用于标记完成");
         if(!status.equals(row.get("status"))){
             store.db.update("update improvement_items set status=? where id=?",status,item);
-            record(id,actor,"UPDATE_ITEM","改进项 #"+item+" → "+status);
+            record(id,actor,"UPDATE_ITEM","改进项 #"+item+" → "+status+(evidence==null ? "" : "\n完成依据："+evidence));
         }
         return store.one("select * from improvement_items where id=?",item);
     }

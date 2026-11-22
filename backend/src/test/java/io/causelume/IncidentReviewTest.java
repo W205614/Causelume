@@ -61,6 +61,11 @@ class IncidentReviewTest {
             "cause","saturated upstream pool","uncertainty","diagnosis pending traffic replay");
         assertEquals("CLOSED",act("CLOSE",Map.of("postmortem",review)).get("status").asString());
         var item=ok(path+"/improvements",Map.of("ownerId",2,"dueDate","2026-07-10","title","monitor upstream capacity"));
+        var tracked=ok(path+"/improvements",Map.of("ownerId",2,"dueDate","2026-07-01","title","keep the probe enabled"));
+        assertEquals(tracked.get("id"),ok("improvements/page",null).get("items").get(0).get("id"));
+        ok(path+"/improvements/"+tracked.get("id").asLong(),Map.of("status","DONE","evidence","Probe returned 200 after deployment"));
+        assertEquals(1,ok("improvements/page",null).get("total").asLong());
+        assertTrue(ok(path,null).get("timeline").toString().contains("Probe returned 200 after deployment"));
         ok(path+"/improvements/"+item.get("id").asLong(),Map.of("status","DONE"));
         assertEquals(1,ok("tickets/page?q=saturated&priority=P1",null).get("total").asLong());
         assertEquals(2,ok(path+"/timeline?page=2&size=2",null).get("items").size());
@@ -93,5 +98,31 @@ class IncidentReviewTest {
             .header("Content-Type","application/json").DELETE().build();
         assertEquals(405,http.send(deletion,HttpResponse.BodyHandlers.discarding()).statusCode());
         assertEquals("P2",ok(path,null).get("priority").asString());
+    }
+
+    @Test void processingHandoverChecksVersionAndNotifiesTheNewOwnerOnce()throws Exception{
+        login("admin");
+        var created=ok("tickets",Map.of("serviceId",1,"requestId",UUID.randomUUID(),"title","processing handover","priority","P1"));
+        path="tickets/"+created.get("id").asLong();
+        act("ASSIGN",Map.of("assigneeId",2));
+        login("operator");
+        var processing=act("START",Map.of());
+        var handover=Map.of("action","REASSIGN","version",processing.get("version"),"assigneeId",1,"note","probe log is on the ticket");
+        assertEquals(403,call(path+"/actions",handover).statusCode());
+        assertTrue(ok("tickets/page?scope=mine",null).get("items").toString().contains("processing handover"));
+        login("admin");
+        var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/"+path+"/actions"))
+            .header("Content-Type","application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(handover))).build();
+        var first=http.sendAsync(request,HttpResponse.BodyHandlers.ofString());
+        var second=http.sendAsync(request,HttpResponse.BodyHandlers.ofString());
+        assertEquals(java.util.Set.of(200,409),java.util.Set.of(first.get().statusCode(),second.get().statusCode()));
+        var detail=ok(path,null);
+        assertEquals("PROCESSING",detail.get("status").asString());
+        assertEquals(1,detail.get("assigneeId").asLong());
+        assertTrue(detail.get("timeline").toString().contains("operator → admin"));
+        assertEquals(1L,store.db.queryForObject("select count(*) from notifications where ticket_id=? and event_type='REASSIGN' and recipient_id=1",Long.class,created.get("id").asLong()));
+        login("operator");
+        assertEquals(403,call(path+"/actions",Map.of("action","VERIFY","version",detail.get("version"),"note","old owner")).statusCode());
     }
 }

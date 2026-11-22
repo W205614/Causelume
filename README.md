@@ -6,7 +6,7 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 [快速开始](#快速开始) · [第一次体验](#第一次体验) · [源码阅读入口](#源码阅读入口) · [文档导航](docs/README.md) · [Linux 部署](docs/production-setup.md)
 
-当前版本：[v1.0.3](https://github.com/W205614/Causelume/releases/tag/v1.0.3)。应用通过公开 Docker/OCI 镜像分发，源码和第三方对应源码随 Release 提供。
+当前版本：[v1.1.0](https://github.com/W205614/Causelume/releases/tag/v1.1.0)。应用通过公开 Docker/OCI 镜像分发，源码和第三方对应源码随 Release 提供。
 
 - **体验界面**　打开部署后的 `/?demo=1`。页面标记「模拟数据」，可以试派工和调查；刷新会重置样例。
 - **验证完整流程**　使用默认的离线模式。示例 checkout 会真正返回 503、生成日志与指标，Python 使用规则分析，全程无需模型密钥。
@@ -76,7 +76,7 @@ docker compose version
 ### 克隆并启动
 
 ~~~sh
-git clone --branch v1.0.3 --depth 1 https://github.com/W205614/Causelume.git
+git clone --branch v1.1.0 --depth 1 https://github.com/W205614/Causelume.git
 cd Causelume
 python scripts/init_env.py
 docker compose pull app agent checkout
@@ -85,14 +85,14 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 
 执行 `docker compose ps`，确认 `app`、`agent`、`checkout` 三个服务均为 `healthy`。打开 [健康检查](http://127.0.0.1:18760/api/health)，应看到 `{"status":"UP"}`。
 
-以上克隆固定版本 `v1.0.3`，其源码提交为 `6dc18d68dfdaf62406e430a8296923fd5e25283f`。根目录 `compose.yaml` 已将服务名映射到下面的完整镜像地址，`docker compose pull app agent checkout` 会读取这些地址；`app`、`agent` 是服务名。`checkout` 以不同命令复用 agent 镜像，无需第三个 Package。
+以上命令克隆 `v1.1.0`。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
 
-| Compose 服务 | 默认公开镜像 | 本版不可变摘要 |
-|---|---|---|
-| `app` | `ghcr.io/w205614/causelume-app:v1.0.3` | `sha256:014563da9123dd0f1c4b83273cfb3ce99c3f707dbef5f5be8130152cf50d05af` |
-| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.0.3` | `sha256:bb2a8d926fea0a336bae11190161bf6fc17622b8c3564a4ce2cd89a2cc6d3244` |
+| Compose 服务 | 默认公开镜像 |
+|---|---|
+| `app` | `ghcr.io/w205614/causelume-app:v1.1.0` |
+| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.1.0` |
 
-两个镜像也提供完整源码提交号标签，内容与版本标签一致。[app Package](https://github.com/users/W205614/packages/container/package/causelume-app) · [agent Package](https://github.com/users/W205614/packages/container/package/causelume-agent) · [Release 镜像清单](https://github.com/W205614/Causelume/releases/download/v1.0.3/images.json)。本版安全修复、扫描和真实运行边界见 [v1.0.3 发布验证](docs/release-1.0.3.md)。
+两个镜像也提供完整源码提交号标签，内容与版本标签一致。[Release 镜像清单](https://github.com/W205614/Causelume/releases/download/v1.1.0/images.json)记录源码提交和不可变摘要。[app Package](https://github.com/users/W205614/packages/container/package/causelume-app) · [agent Package](https://github.com/users/W205614/packages/container/package/causelume-agent)
 
 ### 登录和体验
 
@@ -112,7 +112,7 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 
 已有 `.env` 时跳过初始化，沿用现有账户和数据。升级前备份数据库并在副本上验证迁移，更新镜像后重新创建容器。操作步骤见 [数据迁移](backend/STORAGE.md) 和 [运维手册](docs/operations.md)。
 
-`.env` 中的 `APP_IMAGE` 和 `AGENT_IMAGE` 未设置或留空时使用上表的版本标签。需要按摘要锁定时，将两者设为完整引用 `ghcr.io/w205614/causelume-app@sha256:…` 和 `ghcr.io/w205614/causelume-agent@sha256:…`，填入上表或目标 Release 的实际摘要，再执行拉取和启动命令。升级不覆盖旧公开版本；更新配置也不会重置已有数据库中的账号密码。
+`.env` 中的 `APP_IMAGE` 和 `AGENT_IMAGE` 未设置或留空时使用上表的版本标签。需要按摘要锁定时，使用目标 Release 镜像清单中的完整 `registryReference`，再执行拉取和启动命令。已有数据库继续使用原账号密码。
 
 本机配置可放在不入库的 `compose.override.yaml`。Compose 默认自动合并它；使用 `-f` 时同时列出所需的覆盖文件。`AGENT_MODE=offline` 使用离线规则，`holmes` 使用真实模型。
 
@@ -150,7 +150,7 @@ python scripts/e2e.py --env-file .env --expect-mode offline
 
 本地体验之后，可按需部署到 Linux 单机，使用 PostgreSQL 18、TOTP、邮件通知、Prometheus/Alertmanager/Loki/Alloy、Caddy HTTPS 和加密备份。准备主机、域名及服务账户后，按下表填写配置。凭据存放在受限文件中。
 
-完整步骤见 [Linux 接入手册](docs/production-setup.md)。v1.0.3 的镜像已发布，可直接使用 Release 中的摘要；普通使用者无需触发发布工作流。源码版本与对应源码材料见 [GitHub Releases](https://github.com/W205614/Causelume/releases)。
+完整步骤见 [Linux 接入手册](docs/production-setup.md)。使用者可按 Release 清单中的摘要拉取镜像。源码版本与对应源码材料见 [GitHub Releases](https://github.com/W205614/Causelume/releases)。
 
 <details>
 <summary>查看外部服务配置与发布命令</summary>
@@ -292,7 +292,7 @@ python scripts/verify_candidate.py
 
 可用 `CAUSELUME_BROWSER` 环境变量指定本机 Edge/Chromium。`java`、`node` 和 `mvn` 需在 PATH；只有 `verify_postgres.py` 支持 `--maven` 指定 Maven 路径，`verify_local.py` 不支持该参数。先执行上面的 Maven 构建，再运行依赖本地 JAR 的验收。自动化验收使用独立测试数据、Mailpit 和离线调查。
 
-`verify_local.py` 启动临时数据库与独立测试进程，结束后关闭；它用于验收，不是持久化日常开发服务器。测试覆盖浏览器交互、业务 API、数据库迁移、告警通知、观测取证、模型工具协议及备份恢复。当前版本的离线、真实模型及日常升级结果见 [v1.0.3 发布验证](docs/release-1.0.3.md)。
+`verify_local.py` 启动临时数据库与独立测试进程，结束后关闭。测试覆盖浏览器交互、业务 API、数据库迁移、告警通知、观测取证、模型工具协议及备份恢复。各版本的实际验证范围见 [GitHub Releases](https://github.com/W205614/Causelume/releases)。
 
 ## 常见问题
 

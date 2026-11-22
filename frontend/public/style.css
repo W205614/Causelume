@@ -689,6 +689,34 @@ a:hover {
 .metric-alerts strong {
   color: #a44629;
 }
+.work-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.work-list {
+  list-style: none;
+  margin: 0;
+  padding: 12px 16px;
+}
+.work-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding-block: 6px;
+}
+.work-list li span {
+  flex-shrink: 0;
+  font-size: 0.85em;
+  max-width: 50%;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.timeline p {
+  white-space: pre-line;
+}
 .overview-columns,
 .investigation {
   display: grid;
@@ -903,6 +931,14 @@ time,
     position: sticky;
     top: 0;
     height: 100vh;
+  }
+  aside nav {
+    min-height: 0;
+    overflow-y: auto;
+  }
+  aside .brand,
+  aside .identity {
+    flex-shrink: 0;
   }
   .bar {
     padding: 0 clamp(18px, 3.4vw, 52px);

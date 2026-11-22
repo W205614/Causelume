@@ -17,7 +17,7 @@ class Notifications {
             select k.assignee_id, case when s.maintenance_until>current_timestamp then true else false end as silent
               from tickets k join services s on k.service_id=s.id where k.id=?
             """,ticketId);
-        if(Boolean.TRUE.equals(ticket.get("silent")))return;
+        if(Boolean.TRUE.equals(ticket.get("silent")) && !"REASSIGN".equals(event))return;
         var recipients = store.rows("select id,email from accounts where active=true and id=?",ticket.get("assigneeId"));
         if (recipients.isEmpty()) recipients = store.rows("select id,email from accounts where active=true and role='ADMIN'");
         for (var user : recipients) {
