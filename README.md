@@ -14,12 +14,18 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 ## 控制台实景
 
-以下截图来自演示模式（`/?demo=1`），使用内置样例数据。
+这张截图来自 v1.1.0 的隔离验收。值班人员为同一工单调整查询窗口后再次发起调查，页面保留该次独立快照、查询范围、数据源采样状态和人工反馈。示例使用合成工单与日志，运行于离线规则模式。
 
-![运维概览：未关闭工单、近期告警和调查队列](docs/images/overview.png)
+![调查详情显示独立快照、查询窗口、Loki 截断样本、Prometheus 无样本和人工反馈](docs/images/investigation-v1.1.0.png)
 
 <details>
-<summary>查看工单时间线、调查证据和手机布局</summary>
+<summary>查看值班概览、工单时间线和手机布局</summary>
+
+[查看 v1.1.0 手机端值班待办](docs/images/on-call-v1.1.0-mobile.png)
+
+以下为内置演示模式的样例界面。
+
+![演示模式的运维概览](docs/images/overview.png)
 
 ![工单详情及负责人处理时间线](docs/images/ticket-timeline.png)
 
@@ -33,7 +39,7 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 ![v1.0.3 真实调查：两项冻结工具证据、模型推断与已保存的人工反馈](docs/images/investigation-v1.0.3.png)
 
-本次调查成功并完成 503→200 恢复闭环；画面保留调查时点的分析，不将后续恢复写成模型已经确认的结果。费用待供应商核对，单次验收不能证明长期可用性。素材来源与边界见 [发布验证](docs/release-1.0.3.md)。
+这次历史调查走完了 503→200 恢复闭环。画面展示调查时点的分析，恢复由操作员另行验证。素材来源与边界见 [v1.0.3 发布验证](docs/release-1.0.3.md)。
 
 ## 适用范围与主要能力
 
@@ -43,10 +49,10 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 |---|---|
 | 账户与权限 | 会话、角色、密码管理、停用与会话撤销；生产 profile 强制 TOTP 和单次恢复码 |
 | 告警与通知 | Alertmanager 发生/恢复、去重、服务和环境映射、维护静默、站内消息及邮件投递状态 |
-| 服务与工单 | 服务维护、负责人、筛选分页、优先级、时间线、重开、恢复依据、结构化复盘及改进项 |
-| 调查与证据 | 受限 Prometheus/Loki 查询、冻结快照、来源和完整性、模型推断与人工反馈分区 |
+| 值班与工单 | 我的待处理、未分派、待验证恢复。处理中转派并通知新负责人。保存恢复依据、结构化复盘和我的改进事项 |
+| 服务与取证 | 检测 Prometheus/Loki 是否有匹配样本。发起调查前确认数据源、模式和查询窗口。每次调查保留独立证据和人工反馈 |
 | 费用控制 | 人工发起模型调查、每日预算预留、未知费用保留额度及人工核对 |
-| 数据与交付 | H2→PostgreSQL 核对迁移、生产编排、加密备份、隔离恢复、平台指标、CI 扫描及摘要发布 |
+| 数据与恢复 | H2→PostgreSQL 核对迁移、加密备份、隔离恢复演练。管理员可查看已配置部署的备份、恢复和心跳状态 |
 
 ## 快速开始
 
@@ -85,12 +91,12 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 
 执行 `docker compose ps`，确认 `app`、`agent`、`checkout` 三个服务均为 `healthy`。打开 [健康检查](http://127.0.0.1:18760/api/health)，应看到 `{"status":"UP"}`。
 
-以上命令克隆 `v1.1.0`。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
+以上命令克隆 `v1.1.0`（源码提交 `99fe93ac2b0924a01d7b606f70f34969db823c46`）。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
 
-| Compose 服务 | 默认公开镜像 |
-|---|---|
-| `app` | `ghcr.io/w205614/causelume-app:v1.1.0` |
-| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.1.0` |
+| Compose 服务 | 默认公开镜像 | 不可变摘要 |
+|---|---|---|
+| `app` | `ghcr.io/w205614/causelume-app:v1.1.0` | `sha256:e6728f654b73eb3130fb1b3ead63aa098d148f9a93b42c85046f5afac1b63731` |
+| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.1.0` | `sha256:c2b9ba9686ba11f4b5e795a124fdd03fc7ec66d643e647804d725e8f3f5bad0b` |
 
 两个镜像也提供完整源码提交号标签，内容与版本标签一致。[Release 镜像清单](https://github.com/W205614/Causelume/releases/download/v1.1.0/images.json)记录源码提交和不可变摘要。[app Package](https://github.com/users/W205614/packages/container/package/causelume-app) · [agent Package](https://github.com/users/W205614/packages/container/package/causelume-agent)
 
@@ -124,8 +130,8 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 
 1. 在浏览器打开 [checkout 示例请求](http://127.0.0.1:18761/checkout)，确认返回200，生成一条可供调查的请求样本。
 2. 用 `admin` 登录业务控制台，点击「创建工单」，选择 checkout，填写「核对 checkout 服务状态」。进入工单详情，点击「分派」，选择 `operator` 并填写处理说明。
-3. 退出管理员，用 `operator` 和 `.env` 中对应的密码登录。打开刚才的工单，依次点击「开始处理」「发起调查」，查看采样指标、离线分析与处理建议。
-4. 再次请求 checkout 确认200，在工单中点击「验证恢复」，选择「通过，已有恢复依据」并记录结果。随后点击「关闭并复盘」，填写影响范围、起止时间、原因、不确定性和复盘记录，查看保存后的处理时间线。
+3. 用 `operator` 登录，从概览的「我的待处理」进入工单。点击「开始处理」，再发起调查。确认预览中的服务、离线模式和 checkout 近期快照，完成后查看证据和离线建议。接入 Prometheus/Loki 的服务可在预览中确认或修改取证时间窗口。
+4. 再次请求 checkout，确认返回 200。回到工单点击「验证恢复」，保存恢复依据，再点击「关闭并复盘」。填写影响、起止时间、原因和不确定性。复盘中分配给自己的改进项可从「我的改进事项」继续跟进。
 
 接下来可用下面的脚本体验一次实际503故障及恢复。
 
@@ -150,7 +156,7 @@ python scripts/e2e.py --env-file .env --expect-mode offline
 
 本地体验之后，可按需部署到 Linux 单机，使用 PostgreSQL 18、TOTP、邮件通知、Prometheus/Alertmanager/Loki/Alloy、Caddy HTTPS 和加密备份。准备主机、域名及服务账户后，按下表填写配置。凭据存放在受限文件中。
 
-完整步骤见 [Linux 接入手册](docs/production-setup.md)。使用者可按 Release 清单中的摘要拉取镜像。源码版本与对应源码材料见 [GitHub Releases](https://github.com/W205614/Causelume/releases)。
+启用 Linux 备份与隔离恢复后，管理员可在「备份与恢复」查看状态。控制台展示本机记录的心跳发送结果，机外漏心跳告警由外部探测服务负责。配置与恢复步骤见 [Linux 接入手册](docs/production-setup.md)。源码版本与对应源码材料见 [GitHub Releases](https://github.com/W205614/Causelume/releases)。
 
 <details>
 <summary>查看外部服务配置与发布命令</summary>
