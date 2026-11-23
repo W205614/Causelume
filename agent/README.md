@@ -29,7 +29,7 @@ Java 绑定服务的数据源、`service` 和 `environment` 标签，并创建�
 
 `AGENT_MODE=offline` 使用本地规则。启用 `holmes` 还要求每次请求由 Java 明确传入 `allowModel:true`。缺少授权立即返回 422，在读取任何日志或联系模型前终止。调用目标固定为独立 HolmesGPT 0.46.0。其唯一启用的工具集 `causelume_observations` 只提供只读的 `frozen_metrics` 与 `frozen_logs`。
 
-`holmes-observations.yaml` 的 `llm_instructions` 明确本次只分析已采集的冻结证据。来源失败、无样本或日志截断应提示人工核查原证据源，避免将按设计停用的 Holmes 内置工具误判为未接入，并附带无关的接入建议。断网协议测试检查这些约束实际进入模型请求，不将其视为真实模型输出质量保证。
+`holmes-observations.yaml` 的 `llm_instructions` 将调查范围限定为本次采集的冻结证据。Holmes 内置工具按设计停用。来源失败、无样本或日志截断时，报告应说明证据覆盖范围，并将人工核查建议限定在原证据源的连通性、查询范围和原始记录。断网协议测试检查这些约束实际进入模型请求。
 
 该配置由 Compose 只读挂载到 Holmes；使用 main 的更新配置后，重启 Holmes 即可加载，无需重建 app/agent 镜像。已发布的 v1.0.3 Tag 保留原配置；这项建议质量修正随 main 提供，不覆盖历史版本。应用侧 `promptVersion` 仍标识冻结请求格式，配置变更需同时结合实际 YAML 版本追溯。
 
