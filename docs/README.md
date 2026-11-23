@@ -15,6 +15,7 @@
 | 检查认证、Origin、配额和故障处理 | [安全说明](../backend/SECURITY.md) |
 | 开发或验证控制台 | [前端说明](../frontend/README.md) |
 | 核对当前版本、变更说明和镜像摘要 | [v1.1.0 Release](https://github.com/W205614/Causelume/releases/tag/v1.1.0) |
+| 核对 v1.1.0 正式镜像的真实模型、取证窗口和报告回读 | [v1.1.0 补验记录](release-1.1.0.md) |
 | 查阅上一版的安全修复和真实模型验收 | [v1.0.3 发布验证](release-1.0.3.md) |
 | 核对告警重投修复、镜像分发与验证范围 | [v1.0.2 发布检查](release-1.0.2.md) |
 | 核对请求重投修复、验证与源码发布边界 | [v1.0.1 发布检查](release-1.0.1.md) |
