@@ -35,7 +35,9 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 </details>
 
-v1.1.0 正式镜像已在隔离环境通过一次真实模型调查。使用合成 Prometheus 指标和 Loki 日志，验证了自定义取证窗口、两项冻结证据工具和报告回读。 [v1.1.0 补验记录](docs/release-1.1.0.md)
+v1.1.1 正式镜像通过匿名拉取和本机隔离验收，覆盖 checkout 503 → 200、离线调查、重新进入待办后关闭复盘、调查证据回读、TOTP 和恢复码登录。 [v1.1.1 发布验收](https://github.com/W205614/Causelume/releases/tag/v1.1.1)
+
+v1.1.0 正式镜像曾在隔离环境通过一次真实模型调查。使用合成 Prometheus 指标和 Loki 日志，验证了自定义取证窗口、两项冻结证据工具和报告回读。 [v1.1.0 补验记录](docs/release-1.1.0.md)
 
 以下为 **v1.0.3 实际模型调查**，于 2026-11-10 在隔离环境使用合成 checkout 故障采集。左侧是冻结指标、日志及两项真实工具返回，右侧是模型推断和不确定性；分析建议需要人工核对。
 
@@ -93,12 +95,12 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 
 执行 `docker compose ps`，确认 `app`、`agent`、`checkout` 三个服务均为 `healthy`。打开 [健康检查](http://127.0.0.1:18760/api/health)，应看到 `{"status":"UP"}`。
 
-以上命令克隆 `v1.1.1`。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
+以上命令克隆 `v1.1.1`，源码提交为 `2f86810cdca1bd11a89e32781bf1eca1b11a3b14`。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
 
 | Compose 服务 | 默认公开镜像 | 不可变摘要 |
 |---|---|---|
-| `app` | `ghcr.io/w205614/causelume-app:v1.1.1` |
-| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.1.1` |
+| `app` | `ghcr.io/w205614/causelume-app:v1.1.1` | `sha256:208e871f0fd10ebdbd903bc244c9196271d74b11da45a12db21c891a5036ef17` |
+| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.1.1` | `sha256:39c3115ed9c29035261888ed4e8fdc1966adcda68576568b07f99a792d710af7` |
 
 两个镜像也提供完整源码提交号标签，内容与版本标签一致。[Release 镜像清单](https://github.com/W205614/Causelume/releases/download/v1.1.1/images.json)记录源码提交和不可变摘要。[app Package](https://github.com/users/W205614/packages/container/package/causelume-app) · [agent Package](https://github.com/users/W205614/packages/container/package/causelume-agent)
 
@@ -133,9 +135,11 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 1. 在浏览器打开 [checkout 示例请求](http://127.0.0.1:18761/checkout)，确认返回200，生成一条可供调查的请求样本。
 2. 用 `admin` 登录业务控制台，点击「创建工单」，选择 checkout，填写「核对 checkout 服务状态」。进入工单详情，点击「分派」，选择 `operator` 并填写处理说明。
 3. 用 `operator` 登录，从概览的「我的待处理」进入工单。点击「开始处理」，再发起调查。确认预览中的服务、离线模式和 checkout 近期快照，完成后查看证据和离线建议。接入 Prometheus/Loki 的服务可在预览中确认或修改取证时间窗口。
-4. 再次请求 checkout，确认返回 200。回到工单点击「验证恢复」，保存恢复依据，再点击「关闭并复盘」。填写影响、起止时间、原因和不确定性。复盘中分配给自己的改进项可从「我的改进事项」继续跟进。
+4. 再次请求 checkout，确认返回 200。回到工单点击「验证恢复」，保存恢复依据。已验证工单继续显示在「我的待处理」，可从概览重新进入，完成「关闭并复盘」。填写影响、起止时间、原因和不确定性。复盘中分配给自己的改进项可从「我的改进事项」继续跟进。
 
-接下来可用下面的脚本体验一次实际503故障及恢复。
+服务配置运行手册后，值班人员可从工单详情直接打开。需要交班时，管理员可以转派处理中或已验证的工单。
+
+接下来可用下面的脚本体验一次实际 503 故障及恢复。
 
 ## 完成一条故障流程
 
