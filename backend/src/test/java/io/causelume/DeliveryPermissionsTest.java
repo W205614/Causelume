@@ -28,6 +28,7 @@ class DeliveryPermissionsTest {
         assertEquals(200,call("login",Map.of("username",username,"password","test-"+username+"-secret")).statusCode());
     }
     @Test void onlyRecipientReadsAndAdminExplicitlyResendsUnknown()throws Exception{
+        store.db.update("update accounts set email='ops@example.invalid' where username='operator'");
         long id=store.insert("""
             insert into notifications(recipient_id,event_type,message,mail_to,mail_status)
             values ((select id from accounts where username='operator'),'TEST','human review','ops@example.invalid','UNKNOWN')

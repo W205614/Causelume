@@ -25,6 +25,7 @@ class Tickets {
     @GetMapping("/{id}") @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public Map<String,Object> detail(@PathVariable long id) {
         var row=store.one("select "+COLUMNS+" from tickets where id=?",id);
+        row.put("runbook",store.one("select runbook from services where id=?",row.get("serviceId")).get("runbook"));
         row.put("timeline",store.rows("""
             select * from (select id,action,note,actor,created_at,outcome from timeline where ticket_id=? order by id desc limit 50) recent order by id
             """,id));
@@ -82,10 +83,10 @@ class Tickets {
             case "ASSIGN","REASSIGN" -> {
                 actor.admin();
                 boolean handover=action.equals("REASSIGN");
-                if(handover ? !status.equals("PROCESSING") : !status.equals("OPEN") && !status.equals("ASSIGNED"))
+                if(handover ? !status.equals("PROCESSING") && !status.equals("VERIFIED") : !status.equals("OPEN") && !status.equals("ASSIGNED"))
                     throw new Problem(409,"当前状态不能执行此派工动作");
                 if(input.assigneeId==null) throw new Problem(400,"请选择负责人");
-                var nextOwner=store.one("select username from accounts where id=? and active=true",input.assigneeId);
+                var nextOwner=store.one("select username from accounts where id=? and active=true for update",input.assigneeId);
                 if(handover){
                     if(input.assigneeId.equals(assignee)) throw new Problem(400,"请选择另一位负责人");
                     var previousOwner=store.one("select username from accounts where id=?",assignee);
@@ -130,7 +131,7 @@ class Tickets {
         String outcome=switch(action){case "VERIFY" -> verification; case "PRIORITY" -> priority; default -> null;};
         record(id,action,note,actor,outcome);
         if(action.equals("REASSIGN"))
-            notifications.notifyTicket(id,action,"处理中工单 #"+id+" 已转派给你，请查看交接说明");
+            notifications.notifyTicket(id,action,"工单 #"+id+" 已转派给你，请查看交接说明");
         else if(action.equals("ASSIGN") || action.equals("CLOSE"))
             notifications.notifyTicket(id,action,action.equals("ASSIGN") ? "工单 #"+id+" 已派给你" : "工单 #"+id+" 已关闭");
         return detail(id);

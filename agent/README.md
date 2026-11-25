@@ -14,7 +14,7 @@ Java 绑定服务的数据源、`service` 和 `environment` 标签，并创建�
 | `POST /investigate` | `taskId,sourceId,service,environment,windowStart,windowEnd,allowModel`。时间采用带时区的 ISO 8601 格式，窗口大于零且不超过 24 小时 |
 | 调查结果 | `taskId,service,sourceId,mode,modelExecution,snapshotId,sampledAt,evidence,possibleCause,uncertainty,recommendation,usage`；真实源另返回 `environment,windowStart,windowEnd,completeness,observations` |
 
-生产的只读注册文件由 `SOURCE_REGISTRY_FILE` 指定。修改文件后重新创建 agent。`deployment/observability/sources.json` 给出本项目内部示例。外部数据源可分别在 `prometheus` 或 `loki` 节点增加 `"secretFile":"/run/secrets/reader_token"` 以发送 Bearer 凭据；请求运行时读取文件，路径限定在 `SOURCE_SECRET_DIR`（默认 `/run/secrets`）之下。注册文件只接受固定 HTTP(S) origin。API 只接受登记 ID、时间及受限标签字符，查询模板在服务端生成，拒绝重定向，不使用环境代理。部署者须保护注册文件、内部 DNS，并对外部数据源施加只读角色和网络出口限制。业务 API 不能写入注册表。生产内置源使用查询网关执行 GET 路径白名单，Python 与 Loki/Prometheus 的采集网络隔离。
+生产的只读注册文件由 `SOURCE_REGISTRY_FILE` 指定。修改文件后重新创建 agent。`deployment/observability/sources.json` 给出本项目内部示例。外部数据源可分别在 `prometheus` 或 `loki` 节点增加 `"secretFile":"/run/secrets/reader_token"` 以发送 Bearer 凭据；请求运行时读取文件，路径限定在 `SOURCE_SECRET_DIR`（默认 `/run/secrets`）之下。注册文件只接受固定 HTTP(S) origin，配置 Bearer 凭据的外部源必须使用 HTTPS。API 只接受登记 ID、时间及受限标签字符，查询模板在服务端生成，拒绝重定向，不使用环境代理。部署者须保护注册文件、内部 DNS，并对外部数据源施加只读角色和网络出口限制。业务 API 不能写入注册表。生产内置源使用查询网关执行 GET 路径白名单，Python 与 Loki/Prometheus 的采集网络隔离。
 
 ## 真实源与覆盖范围
 

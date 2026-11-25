@@ -58,8 +58,8 @@ jobs:
     # Record the previous published baseline before building the current source.
     # The release promotion separately verifies the new default version after pushing it.
     env:
-      APP_IMAGE: ghcr.io/w205614/causelume-app@sha256:b6841eed74640bafbffe650af021268a974be86bfcc5090e6cc6dbe1106ca484
-      AGENT_IMAGE: ghcr.io/w205614/causelume-agent@sha256:0105eb3ade64962b93f4afb3ab19b27228a2d5b291bebbf8d0affb57ec867a0b
+      APP_IMAGE: ghcr.io/w205614/causelume-app@sha256:e6728f654b73eb3130fb1b3ead63aa098d148f9a93b42c85046f5afac1b63731
+      AGENT_IMAGE: ghcr.io/w205614/causelume-agent@sha256:c2b9ba9686ba11f4b5e795a124fdd03fc7ec66d643e647804d725e8f3f5bad0b
     steps:
       - uses: actions/checkout@v7.0.1
       - run: python scripts/test_image_identity.py

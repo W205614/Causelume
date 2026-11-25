@@ -633,7 +633,7 @@ root.onclick = async (e) => {
           : input("windowStart", "查询开始（本地时间）", "datetime-local", localTime(preview.windowStart)) +
             input("windowEnd", "查询结束（本地时间）", "datetime-local", localTime(preview.windowEnd)) +
             "<p>最长一小时。尚未发生的时段会在结果中注明。</p>") +
-        (preview.mode === "holmes" ? "<p>有可用证据时会调用模型，可能产生 API 费用。</p>" : ""),
+        (preview.mode === "holmes" ? "<p>有可用证据时，HolmesGPT 会向已配置的模型供应商发送服务、环境、来源标识、时间窗口、指标和脱敏事件。请确认这些数据获准外发。调用可能产生 API 费用。</p>" : ""),
       async (fields) => {
         const payload = { ticketId: currentTicket.id, requestId, serviceVersion: preview.serviceVersion };
         if (!preview.recentSnapshot) {

@@ -4,10 +4,10 @@
 
 - 本地 HTTP 模式下 APP_PUBLIC_ORIGIN 留空，Compose 只发布到回环。登录后写入 HttpOnly、SameSite=Strict 会话 Cookie，空闲 30 分钟失效。服务端在登录时更换会话，登出时销毁会话。
 - 反向代理终止 TLS 时，设置 APP_PUBLIC_ORIGIN 为浏览器实际使用的 HTTPS origin（包括非标准端口，不含路径或尾斜线）。应用用该固定值校验浏览器写入的 Origin，并始终设置 Secure Cookie。将 Java 端口限制在代理可达范围，代理负责限制请求速率及 TLS 配置。
-- Java 使用直接 TCP 对端作为限流来源，忽略 Forwarded、X-Forwarded-For、X-Forwarded-Host、X-Forwarded-Proto。经过同一代理的用户共享该对端额度。本机 HTTP 写入以请求的本地协议和 Host 比较 Origin。脚本可不发送 Origin，所有写操作仍要求 application/json 和相应的会话权限。
+- Java 默认按直接 TCP 对端限流。生产 Compose 的 APP_TRUSTED_LOGIN_PROXY 指向 Caddy，应用只接受该代理覆盖写入的客户端地址，独立客户端分别计数。标准 Forwarded 和 X-Forwarded-* 头不会参与登录限流。自定义代理链需保留这一信任边界。本机 HTTP 写入以请求的本地协议和 Host 比较 Origin。脚本可不发送 Origin，所有写操作仍要求 application/json 和相应的会话权限。
 - 每 60 秒固定窗口内，每个连接来源最多 10 次登录尝试，整个单实例最多 200 次。超限返回 429，可以在一分钟后手动重试。重启重新计算窗口。按来源限制可以避免恶意输错密码锁死他人的账号。未知用户和密码错误返回相同 401，均使用 BCrypt 校验。登录成功和登出写审计，登录失败只记录来源，不记录提供的秘密。被限流的重复请求在一个窗口内合并审计，避免放大写入。
 - 修改密码和开始 MFA 绑定共用独立的当前密码校验窗口。每账号每分钟最多 10 次请求，单实例合计最多 200 次，跨会话累计。失败审计为 `REAUTH_DENIED`，限流首次写入 `REAUTH_LIMITED` 并返回 429。账号管理写操作在事务内再次检查操作者的会话版本。
-- 请求体上限 16 KiB，基于实际读取字节数执行，包括分块传输，越界返回 413。业务字段仍按各自契约校验。
+- 常规 API 请求体上限 16 KiB，Alertmanager 入口为 256 KiB，基于实际读取字节数执行，包括分块传输，越界返回 413。业务字段仍按各自契约校验。
 
 ## 调查、配额和持久化
 

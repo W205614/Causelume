@@ -20,6 +20,7 @@ class MailDeliveryTest {
     static final ServerSocket smtp;
     static final AtomicInteger received=new AtomicInteger();
     static volatile String response="250 accepted";
+    static volatile String lastMessage="";
     static {
         try {
             smtp=new ServerSocket(0,8,InetAddress.getLoopbackAddress());
@@ -42,7 +43,9 @@ class MailDeliveryTest {
         for(String line; (line=input.readLine())!=null;) {
             if(line.equals("DATA")){
                 output.print("354 send\r\n");output.flush();
-                while((line=input.readLine())!=null && !line.equals(".")) {}
+                var message=new StringBuilder();
+                while((line=input.readLine())!=null && !line.equals(".")) message.append(line).append('\n');
+                lastMessage=message.toString();
                 received.incrementAndGet();
                 if(response.equals("disconnect"))return;
                 output.print(response+"\r\n");
@@ -55,12 +58,18 @@ class MailDeliveryTest {
     long enqueue(){
         return store.insert("""
             insert into notifications(recipient_id,event_type,message,mail_to,mail_status)
-            values ((select id from accounts where username='admin'),'TEST','local sink','recipient@example.invalid','PENDING')
+            values ((select id from accounts where username='admin'),'TEST','PRIVATE_ALERT_PAYLOAD','recipient@example.invalid','PENDING')
             """);
     }
     String status(long id){return (String)store.one("select mail_status from notifications where id=?",id).get("mailStatus");}
-    @Test void acceptanceDefiniteRejectionAndUnknownHaveDifferentOutcomes(){
+    @Test void acceptanceDefiniteRejectionAndUnknownHaveDifferentOutcomes() throws Exception {
+        store.db.update("update accounts set email='recipient@example.invalid' where username='admin'");
         long ok=enqueue(); mail.deliver(); assertEquals("SENT",status(ok));
+        var delivered=new jakarta.mail.internet.MimeMessage(jakarta.mail.Session.getInstance(new java.util.Properties()),
+            new ByteArrayInputStream(lastMessage.getBytes(StandardCharsets.UTF_8)));
+        assertTrue(delivered.getSubject().startsWith("Causelume"));
+        assertTrue(delivered.getContent().toString().contains("事件类型 TEST"));
+        assertFalse(delivered.getContent().toString().contains("PRIVATE_ALERT_PAYLOAD"));
         response="451 try later";
         long transientId=enqueue();
         for(int attempt=1;attempt<=4;attempt++){
@@ -76,5 +85,11 @@ class MailDeliveryTest {
         int calls=received.get();mail.deliver();assertEquals(calls,received.get());
         store.db.update("update notifications set mail_status='SENDING' where id=?",ok);
         mail.recover();assertEquals("UNKNOWN",status(ok));mail.deliver();assertEquals(calls,received.get());
+        long stale=enqueue();
+        store.db.update("update accounts set email='replacement@example.invalid' where username='admin'");
+        mail.deliver();
+        assertEquals("FAILED",status(stale));
+        assertEquals("RECIPIENT_CHANGED_OR_NOT_ALLOWED",store.one("select last_error from notifications where id=?",stale).get("lastError"));
+        assertEquals(calls,received.get());
     }
 }

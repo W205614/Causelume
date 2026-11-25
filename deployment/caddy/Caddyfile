@@ -13,5 +13,7 @@
 	}
 	@private path /actuator* /api/integrations/*
 	respond @private 404
-	reverse_proxy app:8080
+	reverse_proxy app:8080 {
+		header_up X-Causelume-Client-IP {http.request.remote.host}
+	}
 }

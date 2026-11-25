@@ -54,6 +54,13 @@ class PostgresAccountsIT {
         var once=Map.of("username","admin","password","test-admin-secret","code",codes.get(0).asString());
         call(other,"login",once,200);
         call(session(),"login",once,401);
+        call(admin,"account/mfa/enroll",Map.of("password","test-admin-secret"),403);
+        String replacement=call(other,"account/mfa/enroll",Map.of("password","test-admin-secret"),200).get("secret").asString();
+        String replacementOtp=new TimeBasedOneTimePasswordGenerator().generateOneTimePasswordString(new SecretKeySpec(new Base32().decode(replacement),"HmacSHA1"),Instant.now(),Locale.ROOT);
+        var replacementCodes=call(other,"account/mfa/confirm",Map.of("code",replacementOtp),200).get("recoveryCodes");
+        call(admin,"me",null,401);
+        call(session(),"login",Map.of("username","admin","password","test-admin-secret","code",codes.get(1).asString()),401);
+        call(admin,"login",Map.of("username","admin","password","test-admin-secret","code",replacementCodes.get(0).asString()),200);
         call(admin,"account/profile",Map.of("email","bad"),400);
         for(String invalid:List.of("oncall@example..test","oncall@.example.test","oncall@example.test.","!@!."+"!.".repeat(100)))
             call(admin,"account/profile",Map.of("email",invalid),400);

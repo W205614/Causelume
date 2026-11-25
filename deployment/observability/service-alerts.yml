@@ -31,6 +31,11 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: '{{ $labels.service }} 有邮件投递失败或确认状态未知，请人工核查'
+      - alert: AlertmanagerDeliveryDropped
+        expr: sum by (service, environment) (increase(causelume_alertmanager_dropped_total{job="causelume"}[15m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $labels.service }} 最近十五分钟出现告警拒收或截断，请核对来源与分组'
       - alert: DatabaseConnectionPoolBusy
         expr: hikaricp_connections_pending{job="causelume"} > 0 or (hikaricp_connections_active{job="causelume"} / hikaricp_connections_max{job="causelume"}) >= 0.9
         for: 2m

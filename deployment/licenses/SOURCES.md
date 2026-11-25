@@ -11,9 +11,9 @@ The release matching the image's `org.opencontainers.image.version` label provid
 
 https://github.com/W205614/Causelume/releases
 
-For this v1.1.0 image release, the corresponding source bundle is:
+For this v1.1.1 image release, the corresponding source bundle is:
 
-https://github.com/W205614/Causelume/releases/download/v1.1.0/causelume-v1.1.0-third-party-sources.zip
+https://github.com/W205614/Causelume/releases/download/v1.1.1/causelume-v1.1.1-third-party-sources.zip
 
 The bundle's `manifest.json` binds the collected sources to the actual app and
 agent image IDs and records each download URL, size, SHA-256, and available

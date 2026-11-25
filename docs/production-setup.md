@@ -6,8 +6,8 @@
 
 1. 安装维护中的 Linux、Python 3.13、Docker Engine 和 Compose v2，启用主机时间同步。工作目录设为 /opt/causelume。Python 用于配置初始化及发布脚本；运行 app/agent 镜像无需宿主 Java、Maven 或 Node。发布脚本还会从源码构建备份/恢复维护镜像，需保留完整源码及联网构建条件。
 2. 防火墙只向外开放 SSH（限制来源）及 80/443。PostgreSQL、Agent、Holmes、Prometheus、Loki、Alertmanager 与管理指标端口通过内部网络访问。
-3. 获取 `v1.1.0` Tag 或经过审核的其他版本完整源码，复制 production.env.example 为 production.env。以专用部署用户运行 `python scripts/init_production.py`。Linux 上 `secrets/` 权限为 0700，其他宿主用户无法遍历。内部凭据文件权限为 0444，Compose 按服务授权单独只读挂载，使容器中不同 UID 能读取所需文件。备份服务另有整个目录的归档权限。将该目录置于部署用户控制、未公开共享的路径下。
-4. 下载 [v1.1.0 的镜像清单](https://github.com/W205614/Causelume/releases/download/v1.1.0/images.json)。将 `images.app.version.registryReference`、`images.agent.version.registryReference` 分别填入 `APP_IMAGE`、`AGENT_IMAGE`，将清单中的 `commit` 填入 `APP_RELEASE`。部署其他版本时使用该版本 Release 的镜像清单。
+3. 获取 `v1.1.1` Tag 或经过审核的其他版本完整源码，复制 production.env.example 为 production.env。以专用部署用户运行 `python scripts/init_production.py`。Linux 上 `secrets/` 权限为 0700，其他宿主用户无法遍历。内部凭据文件权限为 0444，Compose 按服务授权单独只读挂载，使容器中不同 UID 能读取所需文件。备份服务另有整个目录的归档权限。将该目录置于部署用户控制、未公开共享的路径下。
+4. 下载 [v1.1.1 的镜像清单](https://github.com/W205614/Causelume/releases/download/v1.1.1/images.json)。将 `images.app.version.registryReference`、`images.agent.version.registryReference` 分别填入 `APP_IMAGE`、`AGENT_IMAGE`，将清单中的 `commit` 填入 `APP_RELEASE`。部署其他版本时使用该版本 Release 的镜像清单。
 5. 编辑外部凭据及域名，先运行 Compose config --quiet，再使用 sh scripts/release.sh。部署依赖的角色、数据库和内部网络由配置创建。
 
 ~~~sh
@@ -36,7 +36,7 @@ APP_DOMAIN 填域名，不带 https://；非标准端口需显式设置相应入
 
 ## SMTP 与通知
 
-production.env 配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_FROM，secrets/SMTP_PASSWORD 填服务商授权凭据。填写外部凭据时可临时 `chmod u+w secrets/SMTP_PASSWORD`，写入后重新运行 `python scripts/init_production.py` 还原权限；脚本保留现有值。其他外部凭据采用相同步骤。默认使用587端口并要求 STARTTLS、校验证书主机名，connect/read/write 各5秒超时。服务商使用465隐式TLS时，在主机 compose.site.yaml 的 app.environment 中配置 SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE="true"、STARTTLS_ENABLE="false"、STARTTLS_REQUIRED="false"（三个完整属性均保留 MAIL_SMTP 前缀），SSL_CHECKSERVERIDENTITY 保持开启；按服务商文档选择协议。收件邮箱在账户安全页维护。
+production.env 配置 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_FROM，secrets/SMTP_PASSWORD 填服务商授权凭据。填写外部凭据时可临时 `chmod u+w secrets/SMTP_PASSWORD`，写入后重新运行 `python scripts/init_production.py` 还原权限；脚本保留现有值。其他外部凭据采用相同步骤。默认使用587端口并要求 STARTTLS、校验证书主机名，connect/read/write 各5秒超时。服务商使用465隐式TLS时，在主机 compose.site.yaml 的 app.environment 中配置 SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE="true"、STARTTLS_ENABLE="false"、STARTTLS_REQUIRED="false"（三个完整属性均保留 MAIL_SMTP 前缀），SSL_CHECKSERVERIDENTITY 保持开启；按服务商文档选择协议。收件邮箱在账户安全页维护。SMTP_RECIPIENT_DOMAINS 留空时使用 SMTP_FROM 的域。使用专用邮件供应商域发件时，按部署审批填写逗号分隔的收件域。邮件中的工单详情需登录后查看。
 
 投递过程有站内记录。临时拒绝按10秒、1分钟、5分钟最多重试三次；明确永久拒绝终止，发送结果不明不自动重发。管理员在通知中心的「邮件投递管理」查看失败与未知记录。人工重发可能产生重复，需填写依据。
 
@@ -52,7 +52,7 @@ Mailpit用于本地SMTP协议和业务记录测试。配置服务商后，验证
 
 ## 模型和预算
 
-默认 AGENT_MODE=offline。准备有效凭据后，将 OPENAI_API_KEY 写入专用secret，AGENT_MODE=holmes，COMPOSE_PROFILES=holmes，并填写 MODEL_DAILY_BUDGET_USD 与 MODEL_RESERVATION_USD。更新配置重建相应容器后，从工单人工发起。
+默认 AGENT_MODE=offline。准备有效凭据后，将 OPENAI_API_KEY 写入专用secret，AGENT_MODE=holmes，COMPOSE_PROFILES=holmes，并填写 MODEL_DAILY_BUDGET_USD 与 MODEL_RESERVATION_USD。更新配置重建相应容器后，从工单人工发起。先由数据所有者批准服务和来源标识、时间窗口、指标与脱敏事件的外发，核对供应商留存和费用限制。
 
 Java在事务中预留额度，持有预留的人工调查才进入模型请求；切换至holmes模式后，已有的无预留任务由Agent返回422。上下文限制16384、输出1200、最多4步。费用预留用于平台准入，实际计费按供应商账单核对；未知费用保持冻结，管理员填写账单依据后结算。
 

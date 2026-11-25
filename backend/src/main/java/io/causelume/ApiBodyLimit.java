@@ -10,6 +10,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 class ApiBodyLimit extends OncePerRequestFilter {
     static final int MAX_BYTES = 16 * 1024;
+    private static final int ALERTMANAGER_MAX_BYTES = 256 * 1024;
 
     @Override protected boolean shouldNotFilter(HttpServletRequest req) {
         // Encoded characters and matrix parameters must not bypass the API limit.
@@ -19,17 +20,18 @@ class ApiBodyLimit extends OncePerRequestFilter {
     @Override protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
             throws IOException, ServletException {
         long declared = req.getContentLengthLong();
+        int limit = req.getServletPath().startsWith(Alertmanager.PATH + "/") ? ALERTMANAGER_MAX_BYTES : MAX_BYTES;
         if (declared == 0) {
             chain.doFilter(req,res);
             return;
         }
-        if (declared > MAX_BYTES) {
-            reject(res);
+        if (declared > limit) {
+            reject(res,limit);
             return;
         }
-        byte[] body = req.getInputStream().readNBytes(MAX_BYTES + 1);
-        if (body.length > MAX_BYTES) {
-            reject(res);
+        byte[] body = req.getInputStream().readNBytes(limit + 1);
+        if (body.length > limit) {
+            reject(res,limit);
             return;
         }
         var input = new ByteArrayInputStream(body);
@@ -48,9 +50,9 @@ class ApiBodyLimit extends OncePerRequestFilter {
             }
         },res);
     }
-    private void reject(HttpServletResponse res) throws IOException {
+    private void reject(HttpServletResponse res,int limit) throws IOException {
         res.setStatus(413);
         res.setContentType("application/json;charset=UTF-8");
-        res.getWriter().write("{\"message\":\"请求体超过 16 KiB\"}");
+        res.getWriter().write("{\"message\":\"请求体超过 "+(limit/1024)+" KiB\"}");
     }
 }

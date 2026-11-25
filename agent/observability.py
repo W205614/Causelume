@@ -62,6 +62,8 @@ def load_sources():
                 raise ValueError("Link-local, multicast and unspecified source addresses are disallowed")
             endpoint["url"] = endpoint["url"].rstrip("/")
             if "secretFile" in endpoint:
+                if url.scheme != "https":
+                    raise ValueError("A source using a credential requires HTTPS")
                 path = Path(endpoint["secretFile"]).resolve()
                 if not path.is_relative_to(secret_dir):
                     raise ValueError("A source credential must be under SOURCE_SECRET_DIR")

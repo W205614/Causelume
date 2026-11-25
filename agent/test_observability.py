@@ -30,9 +30,7 @@ class ObservabilityTests(unittest.TestCase):
         @self.source.get("/api/v1/query")
         def metrics():
             self.args["metric"] = request.args.copy()
-            # Credentials are injected after selecting the URL from a trusted file.
-            if request.headers.get("Authorization") != "Bearer fixture-bearer":
-                return {}, 401
+            self.assertIsNone(request.headers.get("Authorization"))
             evaluated = datetime.fromisoformat(request.args["time"]).timestamp() if "time" in request.args else 1
             return {"status": "success", "data": {"resultType": "vector", "result": [
                 {"metric": {"signal": "min_up"}, "value": [evaluated + self.metric_offset, "0"]}]}}
@@ -46,8 +44,7 @@ class ObservabilityTests(unittest.TestCase):
                 {"stream": self.stream, "values": [[str(stamp - i), line] for i in range(4)]}]}}
 
         self.url = self.enterContext(http_service(self.source))
-        self.profile = {"id": "testing", "name": "只读源", "prometheus": {"url": self.url,
-                        "secretFile": str(self.token_file)}, "loki": {"url": self.url}}
+        self.profile = {"id": "testing", "name": "只读源", "prometheus": {"url": self.url}, "loki": {"url": self.url}}
         self.body = {"taskId": "abc", "sourceId": "testing", "service": "web", "environment": "dev",
                      "windowStart": "2026-11-01T04:00:00Z", "windowEnd": "2026-11-01T04:05:00Z"}
         self.client = self.app()
@@ -56,7 +53,7 @@ class ObservabilityTests(unittest.TestCase):
         self.registry.write_text(json.dumps([self.profile]))
         return create_app().test_client()
 
-    def test_window_truncation_redaction_and_credentials(self):
+    def test_window_truncation_and_redaction(self):
         self.assertEqual(self.client.get("/sources").status_code, 401)
         items = self.client.get("/sources", headers=auth("fixture-agent")).json["sources"]
         self.assertEqual(items, [{"id": "testing", "name": "只读源", "type": "prometheus-loki"}])
@@ -75,6 +72,16 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(int(self.args["logs"]["end"]) - int(self.args["logs"]["start"]), 300_000_000_000)
         self.assertIn("[300000ms]", self.args["metric"]["query"])
         self.assertEqual(value["usage"]["costUsd"], 0)
+
+    def test_registered_credentials_require_https(self):
+        endpoint = self.profile["prometheus"]
+        endpoint["secretFile"] = str(self.token_file)
+        self.registry.write_text(json.dumps([self.profile]))
+        with self.assertRaisesRegex(ValueError, "requires HTTPS"):
+            load_sources()
+        endpoint["url"] = self.url.replace("http:", "https:", 1)
+        self.registry.write_text(json.dumps([self.profile]))
+        self.assertEqual(load_sources()["testing"]["prometheus"]["secretFile"], self.token_file)
 
     def test_untrusted_input_cannot_supply_endpoints_or_query_language(self):
         for changes, status in [({"url": self.url}, 400), ({"service": 'web"} or vector(1)'}, 400),
@@ -140,9 +147,10 @@ class ObservabilityTests(unittest.TestCase):
         self.assertNotIn("logs", self.args)
 
     def test_server_registration_and_unknown_usage(self):
+        self.profile["prometheus"]["url"] = self.url.replace("http:", "https:", 1)
         self.profile["prometheus"]["secretFile"] = str(self.registry.parent.parent / "out-of-scope")
         self.registry.write_text(json.dumps([self.profile]))
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "under SOURCE_SECRET_DIR"):
             load_sources()
         self.assertEqual(usage("holmes")["status"], "unknown")
         reported = usage("holmes", {"costs": {"prompt_tokens": 230, "completion_tokens": 41, "total_cost": 0.001}})

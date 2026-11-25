@@ -35,7 +35,9 @@ class Store {
 
     // PostgreSQL aborts the current transaction on a uniqueness violation. Callers
     // that inspect the original event after a duplicate need an actual savepoint.
-    long insertIdempotent(String sql,Object... args) { return nested.execute(status -> insert(sql,args)); }
+    long insertIdempotent(String sql,Object... args) { return withSavepoint(() -> insert(sql,args)); }
+
+    <T> T withSavepoint(java.util.function.Supplier<T> work) { return nested.execute(status -> work.get()); }
 
     List<Map<String,Object>> rows(String sql, Object... args) {
         return db.query(sql, (rs, row) -> {

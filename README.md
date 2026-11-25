@@ -6,7 +6,7 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 [快速开始](#快速开始) · [第一次体验](#第一次体验) · [源码阅读入口](#源码阅读入口) · [文档导航](docs/README.md) · [Linux 部署](docs/production-setup.md)
 
-当前版本：[v1.1.0](https://github.com/W205614/Causelume/releases/tag/v1.1.0)。应用通过公开 Docker/OCI 镜像分发，源码和第三方对应源码随 Release 提供。
+当前版本：[v1.1.1](https://github.com/W205614/Causelume/releases/tag/v1.1.1)。应用通过公开 Docker/OCI 镜像分发，源码和第三方对应源码随 Release 提供。
 
 - **体验界面**　打开部署后的 `/?demo=1`。页面标记「模拟数据」，可以试派工和调查；刷新会重置样例。
 - **验证完整流程**　使用默认的离线模式。示例 checkout 会真正返回 503、生成日志与指标，Python 使用规则分析，全程无需模型密钥。
@@ -84,7 +84,7 @@ docker compose version
 ### 克隆并启动
 
 ~~~sh
-git clone --branch v1.1.0 --depth 1 https://github.com/W205614/Causelume.git
+git clone --branch v1.1.1 --depth 1 https://github.com/W205614/Causelume.git
 cd Causelume
 python scripts/init_env.py
 docker compose pull app agent checkout
@@ -93,14 +93,14 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 
 执行 `docker compose ps`，确认 `app`、`agent`、`checkout` 三个服务均为 `healthy`。打开 [健康检查](http://127.0.0.1:18760/api/health)，应看到 `{"status":"UP"}`。
 
-以上命令克隆 `v1.1.0`（源码提交 `99fe93ac2b0924a01d7b606f70f34969db823c46`）。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
+以上命令克隆 `v1.1.1`。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
 
 | Compose 服务 | 默认公开镜像 | 不可变摘要 |
 |---|---|---|
-| `app` | `ghcr.io/w205614/causelume-app:v1.1.0` | `sha256:e6728f654b73eb3130fb1b3ead63aa098d148f9a93b42c85046f5afac1b63731` |
-| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.1.0` | `sha256:c2b9ba9686ba11f4b5e795a124fdd03fc7ec66d643e647804d725e8f3f5bad0b` |
+| `app` | `ghcr.io/w205614/causelume-app:v1.1.1` |
+| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.1.1` |
 
-两个镜像也提供完整源码提交号标签，内容与版本标签一致。[Release 镜像清单](https://github.com/W205614/Causelume/releases/download/v1.1.0/images.json)记录源码提交和不可变摘要。[app Package](https://github.com/users/W205614/packages/container/package/causelume-app) · [agent Package](https://github.com/users/W205614/packages/container/package/causelume-agent)
+两个镜像也提供完整源码提交号标签，内容与版本标签一致。[Release 镜像清单](https://github.com/W205614/Causelume/releases/download/v1.1.1/images.json)记录源码提交和不可变摘要。[app Package](https://github.com/users/W205614/packages/container/package/causelume-app) · [agent Package](https://github.com/users/W205614/packages/container/package/causelume-agent)
 
 ### 登录和体验
 

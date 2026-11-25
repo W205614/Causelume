@@ -12,7 +12,7 @@ export function accountPage(me) {
     (me.enrollmentRequired ? '<p class="retry">请先完成二次验证绑定，再使用工作区。</p>' : "") +
     '<section class="panel"><div class="pad"><h2>登录保护</h2><p>当前账号 ' + esc(me.username) +
     ' · 二次验证' + (me.mfaEnabled ? "已启用" : "尚未绑定") + '</p>' +
-    (!me.mfaEnabled ? '<button data-op="mfaEnroll" class="primary">绑定验证器</button>' : "") +
+    '<button data-op="mfaEnroll" class="primary">' + (me.mfaEnabled ? "换绑验证器" : "绑定验证器") + '</button>' +
     (!me.enrollmentRequired ? '<button data-op="profile">通知邮箱</button><button data-op="changePassword">修改密码</button>' : "") +
     (enrollment ? '<div class="snapshot"><p>在验证器中手动添加以下密钥，再输入验证码确认。</p><code>' + esc(enrollment.secret) +
       '</code><p><button data-op="mfaConfirm">输入验证码完成绑定</button></p></div>' : "") +
@@ -22,7 +22,10 @@ export function accountPage(me) {
 }
 export async function accountAction(op, { form, input, request, refreshMe, render, me, sameSession }) {
   if (op === "mfaEnroll") {
-    form("绑定验证器", input("password", "当前密码", "password"), async values => {
+    const currentFactor = me.mfaEnabled
+      ? '<label>现有验证码或未使用的恢复码<input name="code" autocomplete="one-time-code"></label><p>若刚通过恢复码登录，可在五分钟内留空。</p>'
+      : "";
+    form(me.mfaEnabled ? "换绑验证器" : "绑定验证器", input("password", "当前密码", "password") + currentFactor, async values => {
       const response = await request("/account/mfa/enroll", values);
       if (!sameSession()) return;
       enrollment = response;

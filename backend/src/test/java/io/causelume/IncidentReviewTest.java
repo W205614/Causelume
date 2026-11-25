@@ -57,9 +57,13 @@ class IncidentReviewTest {
         for(String result:new String[]{"UNKNOWN","FAILED"})
             assertEquals("PROCESSING",act("VERIFY",Map.of("verification",result)).get("status").asString());
         assertEquals("VERIFIED",act("VERIFY",Map.of("verification","PASSED")).get("status").asString());
+        assertTrue(ok("overview",null).get("workItems").get("mine").get("items").toString().contains("checkout failed"));
+        assertTrue(ok("tickets/page?scope=mine",null).get("items").toString().contains("checkout failed"));
+        assertEquals("https://example.invalid/runbook",ok(path,null).get("runbook").asString());
         var review=Map.of("impact","payment backlog","startedAt","2026-05-01T10:00:00Z","endedAt","2026-05-01T10:15:00Z",
             "cause","saturated upstream pool","uncertainty","diagnosis pending traffic replay");
         assertEquals("CLOSED",act("CLOSE",Map.of("postmortem",review)).get("status").asString());
+        assertFalse(ok("tickets/page?scope=mine",null).get("items").toString().contains("checkout failed"));
         var item=ok(path+"/improvements",Map.of("ownerId",2,"dueDate","2026-07-10","title","monitor upstream capacity"));
         var tracked=ok(path+"/improvements",Map.of("ownerId",2,"dueDate","2026-07-01","title","keep the probe enabled"));
         assertEquals(tracked.get("id"),ok("improvements/page",null).get("items").get(0).get("id"));
@@ -124,5 +128,14 @@ class IncidentReviewTest {
         assertEquals(1L,store.db.queryForObject("select count(*) from notifications where ticket_id=? and event_type='REASSIGN' and recipient_id=1",Long.class,created.get("id").asLong()));
         login("operator");
         assertEquals(403,call(path+"/actions",Map.of("action","VERIFY","version",detail.get("version"),"note","old owner")).statusCode());
+        login("admin");
+        act("VERIFY",Map.of("verification","PASSED"));
+        long relief=ok("users",Map.of("username","relief","password","test-relief-secret","role","OPERATOR")).get("id").asLong();
+        var originallyVerified=act("REASSIGN",Map.of("assigneeId",relief));
+        assertEquals("VERIFIED",originallyVerified.get("status").asString());
+        ok("users/"+relief+"/status",Map.of("active",false));
+        assertTrue(ok("tickets/page?scope=unassigned",null).get("items").toString().contains("processing handover"));
+        assertEquals("VERIFIED",act("REASSIGN",Map.of("assigneeId",1)).get("status").asString());
+        assertFalse(ok("tickets/page?scope=unassigned",null).get("items").toString().contains("processing handover"));
     }
 }

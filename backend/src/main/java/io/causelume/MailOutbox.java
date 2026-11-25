@@ -4,7 +4,11 @@ import java.net.ConnectException;
 import java.net.UnknownHostException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -23,12 +27,24 @@ class MailOutbox {
     final Store store;
     final JavaMailSender sender;
     final String from;
+    private final String publicOrigin;
+    private final Set<String> recipientDomains;
     private volatile boolean ready;
 
     MailOutbox(Store store, ObjectProvider<JavaMailSender> sender, Environment env) {
         this.store=store;
         this.sender=sender.getIfAvailable();
         this.from=env.getProperty("APP_SMTP_FROM","");
+        this.publicOrigin=env.getProperty("APP_PUBLIC_ORIGIN","");
+        String domains=env.getProperty("APP_SMTP_RECIPIENT_DOMAINS","");
+        if(domains.isBlank() && from.contains("@")) domains=from.substring(from.lastIndexOf('@')+1);
+        recipientDomains=Arrays.stream(domains.split(",")).map(String::strip).filter(domain -> !domain.isEmpty())
+            .map(domain -> domain.toLowerCase(Locale.ROOT)).collect(Collectors.toUnmodifiableSet());
+    }
+
+    boolean allows(String address) {
+        if(from.isBlank()) return true;
+        return address!=null && address.contains("@") && recipientDomains.contains(address.substring(address.lastIndexOf('@')+1).toLowerCase(Locale.ROOT));
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -42,7 +58,7 @@ class MailOutbox {
     void deliver() {
         if(!ready || sender==null || from.isBlank()) return;
         var due=store.rows("""
-            select n.id,n.ticket_id,n.message,n.mail_to,n.attempts from notifications n
+            select n.id,n.ticket_id,n.event_type,n.mail_to,n.attempts from notifications n
             left join tickets k on k.id=n.ticket_id left join services s on s.id=k.service_id
             where n.mail_status in ('PENDING','RETRY') and n.next_attempt<=current_timestamp
             and (s.maintenance_until is null or s.maintenance_until<=current_timestamp)
@@ -59,11 +75,19 @@ class MailOutbox {
             where id=? and attempts=? and mail_status in ('PENDING','RETRY')
             """,id,attempts-1);
         if(claimed==0) return;
+        var account=store.one("select a.active,a.email from accounts a join notifications n on a.id=n.recipient_id where n.id=?",id);
+        String address=(String)row.get("mailTo");
+        if(!Boolean.TRUE.equals(account.get("active")) || !allows(address) || !address.equals(account.get("email"))) {
+            store.db.update("update notifications set mail_status='FAILED',last_error='RECIPIENT_CHANGED_OR_NOT_ALLOWED' where id=? and mail_status='SENDING'",id);
+            return;
+        }
         var message=new SimpleMailMessage();
         message.setFrom(from);
-        message.setTo((String)row.get("mailTo"));
-        message.setSubject("Causelume · 工单 #"+row.get("ticketId"));
-        message.setText((String)row.get("message"));
+        message.setTo(address);
+        Object ticketId=row.get("ticketId");
+        message.setSubject(ticketId==null ? "Causelume · 工作区通知" : "Causelume · 工单 #"+ticketId);
+        String target=ticketId!=null && !publicOrigin.isBlank() ? publicOrigin+"/#tickets/"+ticketId : publicOrigin;
+        message.setText("事件类型 "+row.get("eventType")+"。请登录 Causelume 查看详情。"+(target.isBlank() ? "" : "\n"+target));
         try {
             sender.send(message);
         } catch(MailException error) {

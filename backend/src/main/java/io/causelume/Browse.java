@@ -98,9 +98,9 @@ class Browse {
         switch(scope) {
             case "mine" -> {
                 filters.id("k.assignee_id",actor.id());
-                filters.clauses.add("k.status in ('ASSIGNED','PROCESSING')");
+                filters.clauses.add("k.status in ('ASSIGNED','PROCESSING','VERIFIED')");
             }
-            case "unassigned" -> filters.clauses.add("k.status='OPEN' and k.assignee_id is null");
+            case "unassigned" -> filters.clauses.add("(k.status='OPEN' and k.assignee_id is null or k.status<>'CLOSED' and u.active=false)");
             case "recovery" -> {
                 if(!actor.role().equals("ADMIN")) filters.id("k.assignee_id",actor.id());
                 filters.clauses.add("""

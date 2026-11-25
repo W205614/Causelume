@@ -59,8 +59,10 @@ class Notifications {
         int rows=store.db.update("""
             update notifications set mail_status='PENDING',attempts=0,next_attempt=current_timestamp,last_error=null
              where id=? and mail_status in ('FAILED','UNKNOWN') and mail_to is not null
+               and coalesce(last_error,'')<>'RECIPIENT_CHANGED_OR_NOT_ALLOWED'
+               and exists (select 1 from accounts a where a.id=notifications.recipient_id and a.active=true and a.email=notifications.mail_to)
             """,id);
-        if(rows==0) throw new Problem(409,"只允许人工重发失败或投递结果未知的邮件");
+        if(rows==0) throw new Problem(409,"只允许向当前启用的原收件地址重发失败或投递结果未知的邮件");
         store.audit(actor.username(),"RESEND_EMAIL",id);
         store.db.update("insert into mail_resends(notification_id,actor,reason) values (?,?,?)",id,actor.username(),reason);
         return java.util.Map.of("id",id,"mailStatus","PENDING");

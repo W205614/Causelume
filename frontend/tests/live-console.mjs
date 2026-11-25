@@ -34,6 +34,11 @@ try {
     ["验证恢复", "恢复验证依据"],
     ["关闭并复盘", "复盘记录"],
   ]) {
+    if (action === "关闭并复盘") {
+      await page.getByRole("navigation").getByRole("link", { name: "运维概览" }).click();
+      await page.getByRole("link", { name: "查看全部我的待处理" }).click();
+      await page.getByRole("link", { name: title, exact: true }).click();
+    }
     await page.getByRole("button", { name: action, exact: true }).click();
     await page
       .getByLabel(field, { exact: true })

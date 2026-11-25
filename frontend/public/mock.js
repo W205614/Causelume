@@ -177,8 +177,9 @@ export async function request(path, body) {
   const serviceName = (row) =>
     services.find((s) => s.id === row.serviceId)?.name;
   const work = (scope) => tickets.filter(t => ({
-    mine: t.assigneeId === me.id && ["ASSIGNED", "PROCESSING"].includes(t.status),
-    unassigned: t.status === "OPEN" && !t.assigneeId,
+    mine: t.assigneeId === me.id && ["ASSIGNED", "PROCESSING", "VERIFIED"].includes(t.status),
+    unassigned: (t.status === "OPEN" && !t.assigneeId) ||
+      (t.status !== "CLOSED" && users.some(u => u.id === t.assigneeId && u.active === false)),
     recovery: false,
   })[scope]).sort((a, b) => (a.priority || "P3").localeCompare(b.priority || "P3") ||
     a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
@@ -284,7 +285,7 @@ export async function request(path, body) {
   if (operation === "actions") {
     const step = {
       ASSIGN: [item.status === "ASSIGNED" ? "ASSIGNED" : "OPEN", "ASSIGNED"],
-      REASSIGN: ["PROCESSING", "PROCESSING"],
+      REASSIGN: item.status === "VERIFIED" ? ["VERIFIED", "VERIFIED"] : ["PROCESSING", "PROCESSING"],
       START: ["ASSIGNED", "PROCESSING"],
       VERIFY: ["PROCESSING", "VERIFIED"],
       CLOSE: ["VERIFIED", "CLOSED"],

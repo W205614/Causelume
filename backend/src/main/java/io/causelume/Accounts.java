@@ -1,7 +1,10 @@
 package io.causelume;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.core.env.Environment;
@@ -16,12 +19,15 @@ class Accounts {
     final Environment env;
     final BCryptPasswordEncoder encoder;
     final SecondFactor mfa;
+    final MailOutbox mail;
     final LoginAttempts attempts;
     final LoginAttempts passwordChecks=new LoginAttempts();
     final String dummyHash;
-    Accounts(Store store, Environment env, BCryptPasswordEncoder encoder,LoginAttempts attempts,SecondFactor mfa) {
+    final String loginProxy;
+    Accounts(Store store, Environment env, BCryptPasswordEncoder encoder,LoginAttempts attempts,SecondFactor mfa,MailOutbox mail) {
         this.store=store; this.env=env; this.encoder=encoder;
-        this.attempts=attempts; this.mfa=mfa;
+        this.attempts=attempts; this.mfa=mfa; this.mail=mail;
+        this.loginProxy=env.getProperty("APP_TRUSTED_LOGIN_PROXY","");
         this.dummyHash=encoder.encode(java.util.UUID.randomUUID().toString());
     }
 
@@ -50,7 +56,7 @@ class Accounts {
         return Map.of("status","UP");
     }
     @SessionIndependent @PostMapping("/login") @Transactional(noRollbackFor=Problem.class) public Actor login(@RequestBody Login login,HttpServletRequest req) {
-        String peer=req.getRemoteAddr();
+        String peer=loginPeer(req);
         var decision=attempts.check(peer);
         if (decision!=LoginAttempts.Decision.ALLOW) {
             if(decision==LoginAttempts.Decision.FIRST_LIMIT) store.audit(peer,"LOGIN_LIMITED",0);
@@ -76,8 +82,28 @@ class Accounts {
         var actor=identity(row);
         store.audit(actor.username(),"LOGIN",actor.id());
         if (req.getSession(false)!=null) req.getSession(false).invalidate();
-        req.getSession(true).setAttribute("actor",actor);
+        var session=req.getSession(true);
+        session.setAttribute("actor",actor);
+        if(actor.mfaEnabled() && login.code.length()==32)
+            session.setAttribute("mfaRecoveryUntil",Instant.now().plusSeconds(300));
         return actor;
+    }
+
+    private String loginPeer(HttpServletRequest req) {
+        String peer=req.getRemoteAddr();
+        String forwarded=req.getHeader("X-Causelume-Client-IP");
+        if(loginProxy.isBlank() || forwarded==null ||
+            !(forwarded.matches("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}") ||
+              (forwarded.contains(":") && forwarded.matches("[0-9a-fA-F:.]{2,45}")))) return peer;
+        try {
+            var remote=InetAddress.getByName(peer);
+            for(var trusted:InetAddress.getAllByName(loginProxy)) {
+                if(trusted.equals(remote)) return forwarded;
+            }
+        } catch(UnknownHostException invalid) {
+            // An unavailable proxy must not grant a distinct rate-limit bucket.
+        }
+        return peer;
     }
 
     @GetMapping("/me") Actor me(HttpServletRequest req) { return Access.actor(req); }
@@ -99,8 +125,9 @@ class Accounts {
     record Reset(String newPassword) {}
     record Status(Boolean active) {}
     record Profile(String email) {}
-    record Enroll(String password) {}
+    record Enroll(String password,String code) {}
     record Confirm(String code) {}
+    record PendingMfa(String seed,Instant expiresAt) implements java.io.Serializable {}
 
     private Actor identity(Map<String,Object> row) {
         boolean enabled=row.get("mfaSeed")!=null;
@@ -144,6 +171,7 @@ class Accounts {
         String addr=value.strip();
         if(addr.length()>254 || !addr.matches("[^\\s@,;<>]++@[^\\s@,;<>.]++(?:\\.[^\\s@,;<>.]++)++"))
             throw new Problem(400,"邮箱格式无效");
+        if(!mail.allows(addr)) throw new Problem(400,"收件邮箱不在部署允许的域名内");
         return addr;
     }
 
@@ -196,10 +224,21 @@ class Accounts {
     public Object enroll(@RequestBody Enroll input,HttpServletRequest req) {
         var row=own(req);
         verifyPassword(row,input.password);
-        if(row.get("mfaSeed")!=null) throw new Problem(409,"账户已经绑定 MFA");
+        var session=req.getSession();
+        Instant now=Instant.now();
+        if(row.get("mfaSeed")!=null) {
+            var recoveryUntil=(Instant)session.getAttribute("mfaRecoveryUntil");
+            boolean authorized=input.code==null || input.code.isBlank()
+                ? recoveryUntil!=null && now.isBefore(recoveryUntil)
+                : mfa.consume(store,row,input.code);
+            if(!authorized) {
+                store.audit((String)row.get("username"),"MFA_REBIND_DENIED",(long)row.get("id"));
+                throw new PasswordDenied(403,"需要有效的动态验证码或恢复码");
+            }
+        }
         byte[] seed=mfa.newSeed();
         String secret=mfa.base32(seed);
-        req.getSession().setAttribute("pendingSeed",mfa.encrypt((long)row.get("id"),seed));
+        session.setAttribute("pendingMfa",new PendingMfa(mfa.encrypt((long)row.get("id"),seed),now.plusSeconds(300)));
         String username=java.net.URLEncoder.encode((String)row.get("username"),StandardCharsets.UTF_8).replace("+","%20");
         return Map.of("secret",secret,"uri","otpauth://totp/Causelume:"+username+"?secret="+secret+"&issuer=Causelume");
     }
@@ -208,8 +247,11 @@ class Accounts {
     public Object confirm(@RequestBody Confirm input,HttpServletRequest req) {
         var row=own(req);
         long id=(long)row.get("id");
-        String pending=(String)req.getSession().getAttribute("pendingSeed");
-        if(pending==null || row.get("mfaSeed")!=null) throw new Problem(409,"请开始新的 MFA 绑定");
+        var session=req.getSession();
+        var pendingMfa=(PendingMfa)session.getAttribute("pendingMfa");
+        if(pendingMfa==null || !Instant.now().isBefore(pendingMfa.expiresAt())) throw new Problem(409,"请开始新的 MFA 绑定");
+        String pending=pendingMfa.seed();
+        boolean replacement=row.get("mfaSeed")!=null;
         long step=mfa.match(mfa.decrypt(id,pending),input.code,-1);
         if(step<0) throw new Problem(400,"验证码无效");
         store.db.update("update accounts set mfa_seed=?,last_totp_step=?,auth_version=auth_version+1 where id=?",pending,step,id);
@@ -217,9 +259,10 @@ class Accounts {
         row.put("mfaSeed",pending);
         row.put("authVersion",(long)row.get("authVersion")+1);
         req.changeSessionId();
-        req.getSession().setAttribute("actor",identity(row));
-        req.getSession().removeAttribute("pendingSeed");
-        store.audit((String)row.get("username"),"MFA_ENROLLED",id);
+        session.setAttribute("actor",identity(row));
+        session.removeAttribute("pendingMfa");
+        session.removeAttribute("mfaRecoveryUntil");
+        store.audit((String)row.get("username"),replacement ? "MFA_REBOUND" : "MFA_ENROLLED",id);
         return Map.of("recoveryCodes",codes);
     }
 }

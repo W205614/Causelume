@@ -46,7 +46,7 @@ const labels = {
   OPEN: "待分派",
   ASSIGNED: "已分派",
   PROCESSING: "处理中",
-  VERIFIED: "已验证",
+  VERIFIED: "已验证 · 待关闭",
   CLOSED: "已关闭",
   PENDING: "等待调查",
   RUNNING: "调查中",
@@ -133,7 +133,7 @@ function ticketTable(tickets) {
     ]),
   );
 }
-const workLabels = { mine: "我的待处理", unassigned: "未分派", recovery: "待验证恢复" };
+const workLabels = { mine: "我的待处理", unassigned: "待派工或交接", recovery: "待验证恢复" };
 const sourceLabels = { prometheus: "Prometheus", loki: "Loki", checkout: "checkout" };
 export const sourceLabel = (source) => sourceLabels[source] || source;
 const navLink = (page, title) =>
@@ -213,7 +213,7 @@ export function overview({ summary: s }) {
     '</div>' +
     '<div class="metrics">' +
     metric(s.openTickets, "未关闭工单", "tickets", "tickets") +
-    metric(s.criticalAlerts, "严重告警", "alerts?severity=CRITICAL", "alerts") +
+    metric(s.criticalAlerts, "历史严重告警", "alerts?severity=CRITICAL", "alerts") +
     metric(s.activeTasks, "待执行与运行中调查", "tasks", "tasks") +
     metric(s.services, "监控服务", "services", "services") +
     "</div>" +
@@ -457,6 +457,7 @@ export function alertsPage(data) {
     esc(a.serviceName),
     esc(a.source),
     time(a.occurredAt),
+    a.resolvedAt ? "已恢复 · " + time(a.resolvedAt) : a.fingerprint ? "发生中" : "已记录",
     a.ticketId
       ? navLink("tickets/" + a.ticketId, "#" + a.ticketId)
       : button("fromAlert:" + a.id, "创建工单"),
@@ -467,7 +468,7 @@ export function alertsPage(data) {
     panel(
       "告警记录",
       table(
-        ["级别", "告警标题", "服务", "来源", "发生时间", "关联工单"],
+        ["级别", "告警标题", "服务", "来源", "发生时间", "监控恢复", "关联工单"],
         rows,
       ) + pagination("alerts", data),
     )
@@ -674,7 +675,7 @@ export function detail(
     next && canAdvance ? button("action:" + next, label(next), true) : "";
   if (admin && t.status === "ASSIGNED")
     actions += button("action:ASSIGN", "改派");
-  if (admin && t.status === "PROCESSING")
+  if (admin && ["PROCESSING", "VERIFIED"].includes(t.status))
     actions += button("action:REASSIGN", "转派工单");
   if (next) actions += button("action:NOTE", "添加记录");
   if (admin || actorId === t.assigneeId) {
@@ -699,11 +700,12 @@ export function detail(
     "　" +
     esc(services.find((s) => s.id === t.serviceId)?.name) +
     "</p><p>处理人　" +
-    esc(assignee?.username || "待分派") +
+    esc(assignee?.username || "待分派") + (assignee?.active === false ? "（已停用）" : "") +
     "</p><p>创建时间　" +
     time(t.createdAt) +
     "</p>" +
-    (t.review ? "<p>复盘　" + esc(t.review) + "</p>" : "") +
+    (t.runbook ? '<p><a href="' + esc(t.runbook) + '" target="_blank" rel="noopener noreferrer">打开运行手册</a></p>' : "") +
+    (t.review ? "<p>" + (t.status === "CLOSED" ? "复盘" : "上次关闭复盘") + "　" + esc(t.review) + "</p>" : "") +
     "</div>";
   const timeline =
     '<ol class="timeline">' +
@@ -731,7 +733,7 @@ export function detail(
         (Math.min(Math.ceil(t.timelineTotal / 50), Number(params?.get("timelinePage") || 1) + 1)) + '">更早处理记录</a> · <a href="#tickets/' + t.id + '">最新记录</a></p>' : "") + "</div>") +
     '<div class="ticket-aside">' +
     panel("工单信息", about + '<div class="pad">优先级 ' + esc(t.priority || "P3") + ' · 恢复验证 ' + esc(t.verification || "尚未记录") + '</div>') +
-    (t.impact ? panel("结构化复盘", '<div class="pad"><p>影响范围 ' + esc(t.impact) + '</p><p>发生 ' + time(t.incidentStartedAt) +
+    (t.impact ? panel(t.status === "CLOSED" ? "结构化复盘" : "上次结构化复盘", '<div class="pad"><p>影响范围 ' + esc(t.impact) + '</p><p>发生 ' + time(t.incidentStartedAt) +
       ' · 恢复 ' + time(t.incidentEndedAt) + '</p><h3>原因</h3><p>' + esc(t.cause) + '</p><h3>不确定性</h3><p>' + esc(t.uncertainty) + '</p></div>') : "") +
     panel("改进事项", '<div class="pad">' + (t.improvements || []).map(item => '<p id="improvement-' + item.id + '" tabindex="-1">' + esc(item.title) + ' · ' + (item.status === "DONE" ? "已完成" : "待完成") + ' · 负责人 ' + esc(users.find(user => user.id === item.ownerId)?.username || item.ownerId) + ' · 截止 ' + esc(item.dueDate) +
       (item.status !== "DONE" && (admin || actorId === t.assigneeId || actorId === item.ownerId) ? button("improvementDone:" + item.id, "标记完成") : "") + '</p>').join("") + '</div>') +
