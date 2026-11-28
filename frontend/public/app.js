@@ -165,7 +165,8 @@ async function loadView(page, id, params) {
       const managesTicket = state.managers.has(ticket.teamId);
       const [services, users, invites, related] = await Promise.all([
         request(scoped("/services", ticket.teamId)), request(scoped("/users", ticket.teamId)),
-        !demo && (state.admin || managesTicket || ticket.assigneeId === me.id) ? request("/tickets/" + id + "/invites") : null,
+        !demo && (state.admin || managesTicket || ticket.assigneeId === me.id) ?
+          request("/tickets/" + encodeURIComponent(id) + "/invites") : null,
         request("/tasks/page?ticketId=" + encodeURIComponent(id) + "&size=20"),
       ]);
       if (params.has("timelinePage")) {
