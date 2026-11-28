@@ -6,7 +6,7 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 [快速开始](#快速开始) · [第一次体验](#第一次体验) · [源码阅读入口](#源码阅读入口) · [文档导航](docs/README.md) · [Linux 部署](docs/production-setup.md)
 
-当前版本：[v1.1.1](https://github.com/W205614/Causelume/releases/tag/v1.1.1)。应用通过公开 Docker/OCI 镜像分发，源码和第三方对应源码随 Release 提供。
+当前版本：[v1.2.0](https://github.com/W205614/Causelume/releases/tag/v1.2.0)。应用通过公开 Docker/OCI 镜像分发，源码和第三方对应源码随 Release 提供。
 
 - **体验界面**　打开部署后的 `/?demo=1`。页面标记「模拟数据」，可以试派工和调查；刷新会重置样例。
 - **验证完整流程**　使用默认的离线模式。示例 checkout 会真正返回 503、生成日志与指标，Python 使用规则分析，全程无需模型密钥。
@@ -35,7 +35,7 @@ Causelume 面向个人开发者和小团队，将告警、工单、AI 故障调�
 
 </details>
 
-v1.1.1 正式镜像通过匿名拉取和本机隔离验收，覆盖 checkout 503 → 200、离线调查、重新进入待办后关闭复盘、调查证据回读、TOTP 和恢复码登录。 [v1.1.1 发布验收](https://github.com/W205614/Causelume/releases/tag/v1.1.1)
+v1.2.0 正式镜像在隔离环境验证了同名服务的告警归队、团队证据隔离、单工单邀请与撤销，以及原有 Checkout 503 → 200 闭环。 [v1.2.0 发布验收](https://github.com/W205614/Causelume/releases/tag/v1.2.0)
 
 v1.1.0 正式镜像曾在隔离环境通过一次真实模型调查。使用合成 Prometheus 指标和 Loki 日志，验证了自定义取证窗口、两项冻结证据工具和报告回读。 [v1.1.0 补验记录](docs/release-1.1.0.md)
 
@@ -47,7 +47,7 @@ v1.1.0 正式镜像曾在隔离环境通过一次真实模型调查。使用合�
 
 ## 适用范围与主要能力
 
-项目采用单实例、单 worker，提供共享运维工作区。管理员维护账户、服务与派工；成员共享查看工单和诊断证据，负责人及管理员推进处理、记录复盘并导出报告。支持 Docker Desktop 本地运行和 Linux 单机部署。
+项目采用单实例、单 Worker，支持同一组织内的团队值班。告警、工单和调查按服务归属隔离。工单负责人可邀请其他团队成员查看指定调查并留言，团队管理员可处理成员交接。支持 Docker Desktop 本地运行和 Linux 单机部署。
 
 | 能力 | 已实现内容 |
 |---|---|
@@ -86,7 +86,7 @@ docker compose version
 ### 克隆并启动
 
 ~~~sh
-git clone --branch v1.1.1 --depth 1 https://github.com/W205614/Causelume.git
+git clone --branch v1.2.0 --depth 1 https://github.com/W205614/Causelume.git
 cd Causelume
 python scripts/init_env.py
 docker compose pull app agent checkout
@@ -95,14 +95,14 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 
 执行 `docker compose ps`，确认 `app`、`agent`、`checkout` 三个服务均为 `healthy`。打开 [健康检查](http://127.0.0.1:18760/api/health)，应看到 `{"status":"UP"}`。
 
-以上命令克隆 `v1.1.1`，源码提交为 `2f86810cdca1bd11a89e32781bf1eca1b11a3b14`。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
+以上命令克隆 `v1.2.0`，源码提交为 `7042a9a1a349cb5f99de11b98cae0ed96a68ca94`。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
 
 | Compose 服务 | 默认公开镜像 | 不可变摘要 |
 |---|---|---|
-| `app` | `ghcr.io/w205614/causelume-app:v1.1.1` | `sha256:208e871f0fd10ebdbd903bc244c9196271d74b11da45a12db21c891a5036ef17` |
-| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.1.1` | `sha256:39c3115ed9c29035261888ed4e8fdc1966adcda68576568b07f99a792d710af7` |
+| `app` | `ghcr.io/w205614/causelume-app:v1.2.0` | `sha256:7c4e78e0b58c539f3d8e72256d0379c372a948838cfab3fffca3784785b6cc96` |
+| `agent`、`checkout` | `ghcr.io/w205614/causelume-agent:v1.2.0` | `sha256:54fe62ed653d9ff157ef1b332742012244aae1454e50b065f88ea48ff3781ca7` |
 
-两个镜像也提供完整源码提交号标签，内容与版本标签一致。[Release 镜像清单](https://github.com/W205614/Causelume/releases/download/v1.1.1/images.json)记录源码提交和不可变摘要。[app Package](https://github.com/users/W205614/packages/container/package/causelume-app) · [agent Package](https://github.com/users/W205614/packages/container/package/causelume-agent)
+两个镜像也提供完整源码提交号标签，内容与版本标签一致。[Release 镜像清单](https://github.com/W205614/Causelume/releases/download/v1.2.0/images.json)记录源码提交和不可变摘要。[app Package](https://github.com/users/W205614/packages/container/package/causelume-app) · [agent Package](https://github.com/users/W205614/packages/container/package/causelume-agent)
 
 ### 登录和体验
 

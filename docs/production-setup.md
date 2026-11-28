@@ -21,14 +21,14 @@
 
 如果验收失败且尚未恢复业务写入，停止新应用，从升级前备份恢复到独立数据卷或数据库，使用旧镜像启动并确认读回，再切换。V10 库需搭配 V10 应用。恢复写入后的回退需先保护升级后业务变更，再决定恢复时点。
 
-本手册包含主机准备、外部服务配置、备份恢复和版本更新步骤。准备主机、域名、SMTP、异地仓库和外部探测后，按对应章节接入。部署采用共享运维工作区，成员共享查看服务、工单和诊断证据；部署前确认参与成员与数据可见范围。
+本手册包含主机准备、外部服务配置、备份恢复和版本更新步骤。准备主机、域名、SMTP、异地仓库和外部探测后，按对应章节接入。部署前确认团队成员、服务归属、受信任的观测标签及证据共享范围。
 
 ## 首次主机准备
 
 1. 安装维护中的 Linux、Python 3.13、Docker Engine 和 Compose v2，启用主机时间同步。工作目录设为 /opt/causelume。Python 用于配置初始化及发布脚本；运行 app/agent 镜像无需宿主 Java、Maven 或 Node。发布脚本还会从源码构建备份/恢复维护镜像，需保留完整源码及联网构建条件。
 2. 防火墙只向外开放 SSH（限制来源）及 80/443。PostgreSQL、Agent、Holmes、Prometheus、Loki、Alertmanager 与管理指标端口通过内部网络访问。
-3. 获取 `v1.1.1` Tag 或经过审核的其他版本完整源码，复制 production.env.example 为 production.env。以专用部署用户运行 `python scripts/init_production.py`。Linux 上 `secrets/` 权限为 0700，其他宿主用户无法遍历。内部凭据文件权限为 0444，Compose 按服务授权单独只读挂载，使容器中不同 UID 能读取所需文件。备份服务另有整个目录的归档权限。将该目录置于部署用户控制、未公开共享的路径下。
-4. 下载 [v1.1.1 的镜像清单](https://github.com/W205614/Causelume/releases/download/v1.1.1/images.json)。将 `images.app.version.registryReference`、`images.agent.version.registryReference` 分别填入 `APP_IMAGE`、`AGENT_IMAGE`，将清单中的 `commit` 填入 `APP_RELEASE`。部署其他版本时使用该版本 Release 的镜像清单。
+3. 获取 `v1.2.0` Tag 或经过审核的其他版本完整源码，复制 production.env.example 为 production.env。以专用部署用户运行 `python scripts/init_production.py`。Linux 上 `secrets/` 权限为 0700，其他宿主用户无法遍历。内部凭据文件权限为 0444，Compose 按服务授权单独只读挂载，使容器中不同 UID 能读取所需文件。备份服务另有整个目录的归档权限。将该目录置于部署用户控制、未公开共享的路径下。
+4. 下载 [v1.2.0 的镜像清单](https://github.com/W205614/Causelume/releases/download/v1.2.0/images.json)。将 `images.app.version.registryReference`、`images.agent.version.registryReference` 分别填入 `APP_IMAGE`、`AGENT_IMAGE`，将清单中的 `commit` 填入 `APP_RELEASE`。部署其他版本时使用该版本 Release 的镜像清单。
 5. 编辑外部凭据及域名，先运行 Compose config --quiet，再使用 sh scripts/release.sh。部署依赖的角色、数据库和内部网络由配置创建。
 
 ~~~sh
