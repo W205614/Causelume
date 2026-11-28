@@ -95,7 +95,7 @@ docker compose up -d --no-build --wait --wait-timeout 180 app agent checkout
 
 执行 `docker compose ps`，确认 `app`、`agent`、`checkout` 三个服务均为 `healthy`。打开 [健康检查](http://127.0.0.1:18760/api/health)，应看到 `{"status":"UP"}`。
 
-以上命令克隆 `v1.2.0`，源码提交为 `7042a9a1a349cb5f99de11b98cae0ed96a68ca94`。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
+以上命令克隆 `v1.2.0`，源码提交为 `7042a9a1a349cb5f99de11b98cae0ed96a68ca94`。克隆后继续按本节操作。Tag 和源码 ZIP 内附的 README 与部署手册是归档快照，仍含旧版安装示例。修正版文档链接见 [v1.2.0 Release](https://github.com/W205614/Causelume/releases/tag/v1.2.0)。根目录 `compose.yaml` 将服务名映射到下表的镜像地址。`checkout` 复用 agent 镜像，通过独立命令启动示例服务。
 
 | Compose 服务 | 默认公开镜像 | 不可变摘要 |
 |---|---|---|
@@ -321,3 +321,5 @@ python scripts/verify_candidate.py
 ## 许可证
 
 本项目自有代码和素材采用 [MIT 许可证](LICENSE)，Copyright (c) 2026 W205614。第三方依赖和独立运行的外部组件保留各自许可证，详见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+
+v1.2.0 镜像的 [第三方对应源码包](https://github.com/W205614/Causelume/releases/download/v1.2.0/causelume-v1.2.0-third-party-sources.zip) 可用 [本版 SHA256SUMS](https://github.com/W205614/Causelume/releases/download/v1.2.0/SHA256SUMS) 校验。若镜像内的 `SOURCES.md` 指向 v1.1.1，请使用此处的 v1.2.0 附件。
