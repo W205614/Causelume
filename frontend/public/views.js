@@ -12,6 +12,8 @@ const paths = {
   services: "M3 4h18v6H3z M3 14h18v6H3z M6 7h1 M6 17h1",
   alerts: "M12 3 2 21h20z M12 9v5 M12 17h.01",
   tickets: "M5 3h14v18H5z M8 8h8 M8 12h8 M8 16h4",
+  collaboration: "M3 5h18v11H9l-4 4v-4H3z M7 9h10 M7 12h6",
+  teams: "M3 20v-2a4 4 0 0 1 8 0v2 M7 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6 M14 20v-2a4 4 0 0 1 7 0v2 M17 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6",
   tasks: "M4 12h5l3-8 3 16 3-8h3",
   notifications: "M5 17h14l-2-3V8a5 5 0 0 0-10 0v6z M10 20h4",
   budget: "M3 5h18v15H3z M3 9h18 M15 13h3",
@@ -34,9 +36,11 @@ export const pages = {
   services: "服务与资源",
   alerts: "告警中心",
   tickets: "事件与工单",
+  collaboration: "协作工单",
   tasks: "Agent 调查",
   improvements: "我的改进事项",
   users: "用户管理",
+  teams: "团队管理",
   account: "账户安全",
   notifications: "通知中心",
   budget: "模型预算",
@@ -390,11 +394,11 @@ export function improvementsPage(data) {
     panel(done ? "已完成" : "未完成",
       table(["事项", "原工单", "截止日期", "状态"], rows) + pagination("improvements", data));
 }
-export function servicesPage({ services, admin }) {
+export function servicesPage({ services, admin, managers, teamNames }) {
   return (
     header(
       pages.services,
-      admin ? button("newService", "＋ 添加服务", true) : "",
+      admin || managers?.size ? button("newService", "＋ 添加服务", true) : "",
     ) +
     (services.length
       ? '<div class="grid">' +
@@ -413,7 +417,8 @@ export function servicesPage({ services, admin }) {
               (s.sourceId && s.sourceId !== "checkout-demo"
                 ? navLink("tasks?serviceId=" + s.id, "查看观测调查")
                 : s.name === "checkout" ? navLink("services/" + s.id, "查看日志与指标") : "") +
-              (admin ? '<p>' + button("serviceEdit:" + s.id, "编辑") + button("sourceCheck:" + s.id, "连接检测") +
+              (teamNames?.size > 1 ? '<p>' + esc(teamNames.get(s.teamId)) + '</p>' : "") +
+              (admin || managers?.has(s.teamId) ? '<p>' + button("serviceEdit:" + s.id, "编辑") + button("sourceCheck:" + s.id, "连接检测") +
               (s.maintenanceUntil ? button("maintenanceEnd:" + s.id, "结束静默") : button("maintenance:" + s.id, "维护静默")) + '</p>' : "") +
               '<p>' + esc(s.environment || "default") + " · " + (s.active === false ? "已停用" : "启用") + '</p></article>',
           )
@@ -662,7 +667,7 @@ export function taskDetail(t, { tickets, admin, actorId }) {
 }
 export function detail(
   t,
-  { users, services, tasks, admin, actorId, relatedTotal, params },
+  { users, services, tasks, admin, managesTicket, actorId, relatedTotal, params, invites },
 ) {
   const next = {
     OPEN: "ASSIGN",
@@ -670,14 +675,18 @@ export function detail(
     PROCESSING: "VERIFY",
     VERIFIED: "CLOSE",
   }[t.status];
-  const canAdvance = admin || (next !== "ASSIGN" && actorId === t.assigneeId);
+  const canAdvance = managesTicket || admin || (next !== "ASSIGN" && actorId === t.assigneeId);
   let actions =
     next && canAdvance ? button("action:" + next, label(next), true) : "";
-  if (admin && t.status === "ASSIGNED")
+  if ((admin || managesTicket) && t.status === "ASSIGNED")
     actions += button("action:ASSIGN", "改派");
-  if (admin && ["PROCESSING", "VERIFIED"].includes(t.status))
+  if ((admin || managesTicket) && ["PROCESSING", "VERIFIED"].includes(t.status))
     actions += button("action:REASSIGN", "转派工单");
   if (next) actions += button("action:NOTE", "添加记录");
+  if (invites && next) {
+    actions += button("collabNote", "添加协作留言");
+    if (actorId === t.assigneeId) actions += button("invite", "邀请跨团队协作");
+  }
   if (admin || actorId === t.assigneeId) {
     if (t.status !== "CLOSED") actions += button("priority", "优先级");
     actions += button("improvement", "改进事项");
@@ -687,7 +696,7 @@ export function detail(
   const related = tasks.filter((task) => task.ticketId === t.id);
   if (
     ["ASSIGNED", "PROCESSING"].includes(t.status) &&
-    canAdvance &&
+    (admin || actorId === t.assigneeId) &&
     !related.some((task) =>
       ["QUEUED", "PENDING", "RUNNING"].includes(task.status),
     )
@@ -732,10 +741,13 @@ export function detail(
       (t.timelineTotal > 50 ? '<p><a href="#tickets/' + t.id + '?timelinePage=' +
         (Math.min(Math.ceil(t.timelineTotal / 50), Number(params?.get("timelinePage") || 1) + 1)) + '">更早处理记录</a> · <a href="#tickets/' + t.id + '">最新记录</a></p>' : "") + "</div>") +
     '<div class="ticket-aside">' +
+    (invites?.length ? panel("跨团队协作者", '<div class="pad">' + invites.map(invite =>
+      '<p>' + esc(invite.username) + ' ' + button("inviteRevoke:" + invite.id, "撤销邀请") + '</p>').join("") + '</div>') : "") +
     panel("工单信息", about + '<div class="pad">优先级 ' + esc(t.priority || "P3") + ' · 恢复验证 ' + esc(t.verification || "尚未记录") + '</div>') +
     (t.impact ? panel(t.status === "CLOSED" ? "结构化复盘" : "上次结构化复盘", '<div class="pad"><p>影响范围 ' + esc(t.impact) + '</p><p>发生 ' + time(t.incidentStartedAt) +
       ' · 恢复 ' + time(t.incidentEndedAt) + '</p><h3>原因</h3><p>' + esc(t.cause) + '</p><h3>不确定性</h3><p>' + esc(t.uncertainty) + '</p></div>') : "") +
-    panel("改进事项", '<div class="pad">' + (t.improvements || []).map(item => '<p id="improvement-' + item.id + '" tabindex="-1">' + esc(item.title) + ' · ' + (item.status === "DONE" ? "已完成" : "待完成") + ' · 负责人 ' + esc(users.find(user => user.id === item.ownerId)?.username || item.ownerId) + ' · 截止 ' + esc(item.dueDate) +
+    panel("改进事项", '<div class="pad">' + (t.improvements || []).map(item => '<p id="improvement-' + item.id + '" tabindex="-1">' + esc(item.title) + ' · ' + (item.status === "DONE" ? "已完成" : "待完成") + ' · 负责人 ' + esc(users.find(user => user.id === item.ownerId)?.username || item.ownerId || "待交接") + ' · 截止 ' + esc(item.dueDate) +
+      (item.status !== "DONE" && (admin || managesTicket || actorId === t.assigneeId) && invites ? button("improvementAssign:" + item.id, "交接") : "") +
       (item.status !== "DONE" && (admin || actorId === t.assigneeId || actorId === item.ownerId) ? button("improvementDone:" + item.id, "标记完成") : "") + '</p>').join("") + '</div>') +
     panel(
       "关联调查",

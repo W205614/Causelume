@@ -19,3 +19,9 @@
 ## 目录和审计游标
 
 GET /api/users、/api/services 按 ID 升序，/api/audit 按 ID 降序并限定管理员。默认返回最多 100 项的 JSON 数组。limit 接受 1–100。存在后续结果时，X-Next-Cursor 返回当前页最后一个 ID，Link 给出下一页路径。下一页带 afterId 与 limit；无下一页时两个响应头均省略。此契约保留原有数组结构。
+# 多团队授权范围
+
+- 平台管理员拥有全局权限。其他用户的服务、告警、工单、调查及汇总在数据库查询中按当时的团队成员关系过滤。团队上下文筛选只进一步缩小查询。
+- `GET /api/teams` 返回可访问团队，`POST /api/teams` 由平台管理员创建团队。团队成员使用 `/api/teams/{id}/members` 查看与维护，移除接口可指定 `successorId`。
+- 工单负责人通过 `POST /api/tickets/{id}/invites` 按账号授予单工单访问，可选 `taskIds` 明确共享已成功的调查。受邀者在 `/api/collaborations` 查看摘要、留言和共享结果。撤销会隐藏原邀请通知并取消未发邮件。SMTP 已接收的邮件无法追回。
+- Alertmanager 接入的机器身份限定到团队，告警内容中的标签不能改变所属团队。共享观测后端取证的组织内隔离依赖平台配置的可信采集团队标签。

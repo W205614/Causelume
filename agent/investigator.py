@@ -189,7 +189,9 @@ def create_app():
     @app.get("/sources")
     def list_sources():
         authenticate(token)
-        return {"sources": [{key: entry[key] for key in ("id", "name", "type")} for entry in registry.values()]}
+        return {"sources": [{"id": entry["id"], "name": entry["name"], "type": entry["type"],
+                             **({"teamScoped": True} if entry.get("teamScoped") else {})}
+                            for entry in registry.values()]}
 
     @app.get("/sources/<source_id>/check")
     def check_source(source_id):
@@ -197,7 +199,8 @@ def create_app():
         profile = registry.get(source_id)
         if profile is None:
             abort(404, "数据源未注册")
-        labels = target(request.args.get("service"), request.args.get("environment"))
+        labels = target(request.args.get("service"), request.args.get("environment"),
+                        profile=profile, team=request.args.get("team"))
         checks = []
         if source_id == DEMO["id"]:
             try:
@@ -222,7 +225,7 @@ def create_app():
         if (not isinstance(body, dict) or not isinstance(body.get("taskId"), str)
                 or not body["taskId"].strip() or len(body["taskId"]) > 128):
             abort(400, "taskId 必须为有效字符串")
-        if set(body) - {"taskId", "service", "sourceId", "environment", "windowStart", "windowEnd", "allowModel"}:
+        if set(body) - {"taskId", "service", "sourceId", "environment", "windowStart", "windowEnd", "allowModel", "team"}:
             abort(400, "调查仅接受服务绑定和采样时间参数")
         if type(body.get("allowModel", False)) is not bool:
             abort(400, "allowModel 必须为布尔值")
@@ -232,7 +235,7 @@ def create_app():
         if not isinstance(source_id, str) or source_id not in registry:
             abort(422, "数据源未注册")
         if source_id == DEMO["id"]:
-            if body.get("service") != "checkout":
+            if body.get("service") != "checkout" or body.get("team") is not None:
                 abort(422, "该服务尚未登记诊断工具")
             observations, snapshot = sample_checkout(demo_url, evidence_token)
             observations.update(service="checkout", sourceId=source_id)

@@ -19,7 +19,7 @@ class Browse {
     static final Set<String> TASK_STATES = Set.of("PENDING", "RUNNING", "SUCCEEDED", "FAILED");
     static final Set<String> SEVERITIES = Set.of("INFO", "WARNING", "CRITICAL");
     private static final String TICKET_FROM = "tickets k join services s on s.id=k.service_id left join accounts u on u.id=k.assignee_id";
-    private static final String TICKET_FIELDS = "k.id,k.service_id,k.alert_id,k.title,k.status,k.priority,k.verification,k.assignee_id,k.version,k.created_at,s.name as service_name,u.username as assignee_name";
+    private static final String TICKET_FIELDS = "k.id,k.service_id,k.alert_id,k.title,k.status,k.priority,k.verification,k.assignee_id,k.version,k.created_at,s.name as service_name,s.team_id,u.username as assignee_name";
     private static final String ALERT_FROM = "alerts a join services s on s.id=a.service_id left join tickets k on k.alert_id=a.id";
     private static final String ALERT_FIELDS = "a.*,s.name as service_name,k.id as ticket_id";
     private static final String TASK_FROM = "tasks t join tickets k on k.id=t.ticket_id join services s on s.id=k.service_id";
@@ -33,6 +33,13 @@ class Browse {
     private static class Filters {
         final List<String> clauses = new ArrayList<>();
         final List<Object> values = new ArrayList<>();
+
+        Filters scoped(Actor actor,Long team) {
+            var scope=TeamAccess.scope(actor,"s.team_id",team);
+            clauses.add(scope.sql());
+            values.addAll(scope.args());
+            return this;
+        }
 
         void id(String column, Long value) {
             if (value != null) {
@@ -70,9 +77,11 @@ class Browse {
                         @RequestParam(required=false) String status, @RequestParam(required=false) Long serviceId,
                         @RequestParam(required=false) Long assigneeId, @RequestParam(required=false) String q,
                         @RequestParam(required=false) String priority, @RequestParam(required=false) String scope,
+                        @RequestParam(required=false) Long teamId,
                         HttpServletRequest req) {
+        var actor=Access.actor(req);
         return tickets(page,size,status,serviceId,assigneeId,q,priority,
-                scope==null ? new Filters() : workItems(scope,Access.actor(req)),scope);
+                (scope==null ? new Filters() : workItems(scope,actor)).scoped(actor,teamId),scope);
     }
 
     private Page tickets(int page,int size,String status,Long serviceId,Long assigneeId,String q,
@@ -100,9 +109,13 @@ class Browse {
                 filters.id("k.assignee_id",actor.id());
                 filters.clauses.add("k.status in ('ASSIGNED','PROCESSING','VERIFIED')");
             }
-            case "unassigned" -> filters.clauses.add("(k.status='OPEN' and k.assignee_id is null or k.status<>'CLOSED' and u.active=false)");
+            case "unassigned" -> filters.clauses.add("k.status<>'CLOSED' and (k.assignee_id is null or u.active=false)");
             case "recovery" -> {
-                if(!actor.role().equals("ADMIN")) filters.id("k.assignee_id",actor.id());
+                if(!TeamAccess.platform(actor)){
+                    filters.clauses.add("(k.assignee_id=? or exists(select 1 from team_members m where m.team_id=s.team_id and m.account_id=? and m.team_role='MANAGER'))");
+                    filters.values.add(actor.id());
+                    filters.values.add(actor.id());
+                }
                 filters.clauses.add("""
                     k.status in ('OPEN','ASSIGNED','PROCESSING')
                     and (k.verification is null or k.verification<>'PASSED')
@@ -118,8 +131,9 @@ class Browse {
 
     @GetMapping("/alerts/page")
     public Page alerts(@RequestParam(defaultValue="1") int page, @RequestParam(defaultValue="20") int size,
-                       @RequestParam(required=false) String severity, @RequestParam(required=false) Long serviceId) {
-        var filters = new Filters();
+                       @RequestParam(required=false) String severity, @RequestParam(required=false) Long serviceId,
+                       @RequestParam(required=false) Long teamId,HttpServletRequest req) {
+        var filters = new Filters().scoped(Access.actor(req),teamId);
         filters.id("a.service_id", serviceId);
         filters.code("a.severity", severity, SEVERITIES);
         return query(ALERT_FIELDS, ALERT_FROM, "a.id desc", filters, page, size);
@@ -128,37 +142,39 @@ class Browse {
     @GetMapping("/tasks/page")
     public Page tasks(@RequestParam(defaultValue="1") int page, @RequestParam(defaultValue="20") int size,
                       @RequestParam(required=false) String status, @RequestParam(required=false) Long ticketId,
-                      @RequestParam(required=false) Long serviceId) {
-        var filters = new Filters();
+                      @RequestParam(required=false) Long serviceId,@RequestParam(required=false) Long teamId,HttpServletRequest req) {
+        var filters = new Filters().scoped(Access.actor(req),teamId);
         filters.id("t.ticket_id", ticketId);
         filters.id("k.service_id", serviceId);
         filters.code("t.status", status, TASK_STATES);
         return query(TASK_FIELDS, TASK_FROM, "t.id desc", filters, page, size);
     }
 
-    private Map<String, Long> counts(String table, String field, Set<String> keys) {
+    private Map<String, Long> counts(String table, String field, Set<String> keys,TeamAccess.Scope scope) {
         var result = new LinkedHashMap<String, Long>();
         keys.forEach(key -> result.put(key, 0L));
-        for (var row : store.rows("select " + field + " as code,count(*) as n from " + table + " group by " + field)) {
+        for (var row : store.rows("select " + field + " as code,count(*) as n from " + table + " where "+scope.sql()+" group by " + field,scope.with())) {
             result.put((String)row.get("code"), (Long)row.get("n"));
         }
         return result;
     }
 
     @GetMapping("/overview")
-    public Map<String,Object> overview(HttpServletRequest req) {
+    public Map<String,Object> overview(@RequestParam(required=false) Long teamId,HttpServletRequest req) {
         var actor=Access.actor(req);
-        var alerts = counts("alerts", "severity", SEVERITIES);
-        var tasks = counts("tasks", "status", TASK_STATES);
-        return Map.of("openTickets", store.db.queryForObject("select count(*) from tickets where status<>'CLOSED'", Long.class),
+        var scope=TeamAccess.scope(actor,"s.team_id",teamId);
+        String where=" where "+scope.sql();
+        var alerts = counts(ALERT_FROM, "a.severity", SEVERITIES,scope);
+        var tasks = counts(TASK_FROM, "t.status", TASK_STATES,scope);
+        return Map.of("openTickets", store.db.queryForObject("select count(*) from "+TICKET_FROM+where+" and k.status<>'CLOSED'", Long.class,scope.with()),
             "criticalAlerts", alerts.get("CRITICAL"), "activeTasks", tasks.get("PENDING") + tasks.get("RUNNING"),
-            "services", store.db.queryForObject("select count(*) from services", Long.class),
+            "services", store.db.queryForObject("select count(*) from services s"+where, Long.class,scope.with()),
             "alertCounts", alerts, "taskCounts", tasks,
-            "recentTickets", store.rows("select " + TICKET_FIELDS + " from " + TICKET_FROM + " order by k.id desc limit 5"),
-            "recentAlerts", store.rows("select " + ALERT_FIELDS + " from " + ALERT_FROM + " order by a.id desc limit 5"),
+            "recentTickets", store.rows("select " + TICKET_FIELDS + " from " + TICKET_FROM + where+" order by k.id desc limit 5",scope.with()),
+            "recentAlerts", store.rows("select " + ALERT_FIELDS + " from " + ALERT_FROM + where+" order by a.id desc limit 5",scope.with()),
             "workItems", Map.of(
-                "mine",query(TICKET_FIELDS,TICKET_FROM,WORK_ORDER,workItems("mine",actor),1,5),
-                "unassigned",query(TICKET_FIELDS,TICKET_FROM,WORK_ORDER,workItems("unassigned",actor),1,5),
-                "recovery",query(TICKET_FIELDS,TICKET_FROM,WORK_ORDER,workItems("recovery",actor),1,5)));
+                "mine",query(TICKET_FIELDS,TICKET_FROM,WORK_ORDER,workItems("mine",actor).scoped(actor,teamId),1,5),
+                "unassigned",query(TICKET_FIELDS,TICKET_FROM,WORK_ORDER,workItems("unassigned",actor).scoped(actor,teamId),1,5),
+                "recovery",query(TICKET_FIELDS,TICKET_FROM,WORK_ORDER,workItems("recovery",actor).scoped(actor,teamId),1,5)));
     }
 }

@@ -192,8 +192,10 @@ async function serve(page, respond) {
     });
     const tables = {
       "/me": me,
+      "/teams": [{ id: 1, slug: "default", name: "默认团队" }],
       "/tickets": [ticket],
       "/tickets/7": ticket,
+      "/tickets/7/invites": [],
       "/alerts": [alert],
       "/services": [service],
       "/users": [me],

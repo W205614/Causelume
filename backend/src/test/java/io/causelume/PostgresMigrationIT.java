@@ -13,6 +13,25 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 class PostgresMigrationIT {
     @TempDir Path tmp;
+    @Test void upgradesV9AndImportsV10Workspace() throws Exception {
+        var migrator=new DriverManagerDataSource(System.getenv("TEST_PG_TEAM_URL"),"causelume_migrator",System.getenv("APP_MIGRATOR_PASSWORD"));
+        TeamMigrationTest.migrate(migrator,"postgresql","9");
+        var pg=new JdbcTemplate(migrator);
+        TeamMigrationTest.seed(pg);
+        TeamMigrationTest.migrate(migrator,"postgresql","latest");
+        TeamMigrationTest.assertMigration(pg);
+
+        Path base=tmp.resolve("team");
+        var source=new DriverManagerDataSource("jdbc:h2:file:"+base,"sa","");
+        TeamMigrationTest.migrate(source,"migration","9");
+        TeamMigrationTest.seed(new JdbcTemplate(source));
+        TeamMigrationTest.migrate(source,"migration","latest");
+        var dump=tmp.resolve("team.jsonl");
+        try(var connection=source.getConnection()) { OfflineStorage.export(connection,dump); }
+        var target=new DriverManagerDataSource(System.getenv("TEST_PG_TEAM_IMPORT_URL"),"causelume_migrator",System.getenv("APP_MIGRATOR_PASSWORD"));
+        OfflineStorage.load(target,dump,"causelume_app");
+        TeamMigrationTest.assertMigration(new JdbcTemplate(target));
+    }
     @Test void preservesV5DataSequencesAndRefusesNonemptyTarget() throws Exception {
         Path base=tmp.resolve("legacy");
         var h2=new DriverManagerDataSource("jdbc:h2:file:"+base,"","");

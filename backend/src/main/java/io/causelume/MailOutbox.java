@@ -58,7 +58,7 @@ class MailOutbox {
     void deliver() {
         if(!ready || sender==null || from.isBlank()) return;
         var due=store.rows("""
-            select n.id,n.ticket_id,n.event_type,n.mail_to,n.attempts from notifications n
+            select n.id,n.ticket_id,n.invite_id,n.event_type,n.mail_to,n.attempts from notifications n
             left join tickets k on k.id=n.ticket_id left join services s on s.id=k.service_id
             where n.mail_status in ('PENDING','RETRY') and n.next_attempt<=current_timestamp
             and (s.maintenance_until is null or s.maintenance_until<=current_timestamp)
@@ -86,8 +86,15 @@ class MailOutbox {
         message.setTo(address);
         Object ticketId=row.get("ticketId");
         message.setSubject(ticketId==null ? "Causelume · 工作区通知" : "Causelume · 工单 #"+ticketId);
-        String target=ticketId!=null && !publicOrigin.isBlank() ? publicOrigin+"/#tickets/"+ticketId : publicOrigin;
+        String page=row.get("inviteId")==null?"tickets":"collaboration";
+        String target=ticketId!=null && !publicOrigin.isBlank() ? publicOrigin+"/#"+page+"/"+ticketId : publicOrigin;
         message.setText("事件类型 "+row.get("eventType")+"。请登录 Causelume 查看详情。"+(target.isBlank() ? "" : "\n"+target));
+        if(store.rows("""
+            select id from notifications where id=? and exists (select 1 from accounts a where a.id=notifications.recipient_id and a.active=true) and
+            """+Notifications.VISIBLE,id).isEmpty()){
+            store.db.update("update notifications set mail_status='CANCELLED',last_error='ACCESS_REVOKED' where id=? and mail_status='SENDING'",id);
+            return;
+        }
         try {
             sender.send(message);
         } catch(MailException error) {

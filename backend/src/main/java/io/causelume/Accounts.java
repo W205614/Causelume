@@ -20,13 +20,15 @@ class Accounts {
     final BCryptPasswordEncoder encoder;
     final SecondFactor mfa;
     final MailOutbox mail;
+    final Teams teams;
     final LoginAttempts attempts;
     final LoginAttempts passwordChecks=new LoginAttempts();
     final String dummyHash;
     final String loginProxy;
-    Accounts(Store store, Environment env, BCryptPasswordEncoder encoder,LoginAttempts attempts,SecondFactor mfa,MailOutbox mail) {
+    Accounts(Store store, Environment env, BCryptPasswordEncoder encoder,LoginAttempts attempts,SecondFactor mfa,MailOutbox mail,Teams teams) {
         this.store=store; this.env=env; this.encoder=encoder;
         this.attempts=attempts; this.mfa=mfa; this.mail=mail;
+        this.teams=teams;
         this.loginProxy=env.getProperty("APP_TRUSTED_LOGIN_PROXY","");
         this.dummyHash=encoder.encode(java.util.UUID.randomUUID().toString());
     }
@@ -34,8 +36,8 @@ class Accounts {
     @Transactional
     public void bootstrap() {
         if (store.db.queryForObject("select count(*) from accounts", Long.class)>0) return;
-        create("admin",env.getRequiredProperty("APP_ADMIN_PASSWORD"),"ADMIN");
-        create("operator",env.getRequiredProperty("APP_OPERATOR_PASSWORD"),"OPERATOR");
+        TeamAccess.addDefault(store,create("admin",env.getRequiredProperty("APP_ADMIN_PASSWORD"),"ADMIN"));
+        TeamAccess.addDefault(store,create("operator",env.getRequiredProperty("APP_OPERATOR_PASSWORD"),"OPERATOR"));
     }
 
     private long create(String username,String password,String role) {
@@ -49,7 +51,9 @@ class Accounts {
     }
 
     record Login(String username,String password,String code) {}
-    record Account(String username,String password,String role,String email) {}
+    record Account(String username,String password,String role,String email,Long teamId) {
+        Account(String username,String password,String role,String email) { this(username,password,role,email,null); }
+    }
 
     @SessionIndependent @GetMapping("/health") Object health() {
         store.db.queryForObject("select 1", Integer.class);
@@ -115,8 +119,12 @@ class Accounts {
     }
     @PostMapping("/users") @Transactional
     public Object user(@RequestBody Account input,HttpServletRequest req) {
+        Access.actor(req).admin();
+        long team=input.teamId==null?TeamAccess.DEFAULT_TEAM:input.teamId;
+        store.one("select id from teams where id=? for update",team);
         Actor actor=adminWriter(req);
         long id=create(input.username,input.password,input.role);
+        store.db.update("insert into team_members(team_id,account_id,team_role) values (?,?,'MEMBER')",team,id);
         store.db.update("update accounts set email=? where id=?",email(input.email),id);
         store.audit(actor.username(),"CREATE_USER",id);
         return store.one("select id,username,role from accounts where id=?",id);
@@ -208,6 +216,9 @@ class Accounts {
     }
     @PostMapping("/users/{id}/status") @Transactional
     public Object status(@PathVariable long id,@RequestBody Status input,HttpServletRequest req) {
+        Access.actor(req).admin();
+        // Account-wide changes serialize with assignments, invitations and membership writes in every team.
+        store.rows("select id from teams order by id for update");
         var actor=adminWriter(req);
         if(input.active==null) throw new Problem(400,"需要 active");
         var target=store.one("select role,active from accounts where id=? for update",id);
@@ -216,6 +227,7 @@ class Accounts {
             store.db.queryForObject("select count(*) from accounts where role='ADMIN' and active=true",Long.class)<=1)
             throw new Problem(409,"必须保留至少一名启用的管理员");
         store.db.update("update accounts set active=?,auth_version=auth_version+1 where id=?",input.active,id);
+        if(!input.active) teams.accountDisabled(actor,id);
         store.audit(actor.username(),input.active ? "ENABLE_ACCOUNT" : "DISABLE_ACCOUNT",id);
         return Map.of("ok",true);
     }

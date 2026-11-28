@@ -12,7 +12,7 @@ RUN apk add --no-cache --upgrade zlib=1.4-r0 openssl=3.5.9-r1 libcrypto3=3.5.9-r
 WORKDIR /app
 # Preserve the numeric identity that owns existing H2 volumes.
 RUN mkdir /app/data && chown 999:999 /app/data
-COPY --from=build /src/backend/target/causelume-1.1.1.jar /app/server.jar
+COPY --from=build /src/backend/target/causelume-1.2.0.jar /app/server.jar
 COPY LICENSE THIRD_PARTY_NOTICES.md deployment/licenses/SOURCES.md /usr/share/causelume/licenses/
 COPY --from=build /src/runtime-dependencies.txt /usr/share/causelume/licenses/java-dependencies.txt
 RUN cp /lib/apk/db/installed /usr/share/causelume/licenses/alpine-packages.txt

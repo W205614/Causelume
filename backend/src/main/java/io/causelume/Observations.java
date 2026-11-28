@@ -1,5 +1,6 @@
 package io.causelume;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -7,12 +8,15 @@ import org.springframework.web.bind.annotation.*;
 class Observations {
     private final Store store;
     private final InternalClient upstream;
-    Observations(Store store, InternalClient upstream) {
+    private final TeamAccess access;
+    Observations(Store store, InternalClient upstream,TeamAccess access) {
         this.store = store;
         this.upstream = upstream;
+        this.access = access;
     }
     @GetMapping("/{id}/{kind:metrics|logs}")
-    Object observe(@PathVariable long id, @PathVariable String kind) {
+    Object observe(@PathVariable long id, @PathVariable String kind,HttpServletRequest req) {
+        access.requireTeam(Access.actor(req),access.serviceTeam(id));
         var service = store.one("select source_id,service_label,active from services where id=?",id);
         if (!Boolean.TRUE.equals(service.get("active")))throw new Problem(409,"服务已停用");
         if (!"checkout-demo".equals(service.get("sourceId")) || !"checkout".equals(service.get("serviceLabel")))

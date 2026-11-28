@@ -40,8 +40,10 @@ def load_sources():
     if not isinstance(profiles, list) or len(profiles) > 64:
         raise ValueError("Expected a list of up to 64 registered source profiles")
     secret_dir = Path(os.environ.get("SOURCE_SECRET_DIR", "/run/secrets")).resolve()
+    endpoint_modes = {}
     for p in profiles:
-        if (set(p) != {"id", "name", PROM, LOKI} or not LABEL.fullmatch(p["id"])
+        if (not isinstance(p, dict) or not {"id", "name", PROM, LOKI} <= p.keys() <= {"id", "name", PROM, LOKI, "teamScoped"}
+                or type(p.get("teamScoped", False)) is not bool or not isinstance(p["id"], str) or not LABEL.fullmatch(p["id"])
                 or p["id"] in registry or p["id"] == DEMO["id"]
                 or not isinstance(p["name"], str) or not 1 <= len(p["name"]) <= 100):
             raise ValueError("Invalid or duplicate source profile")
@@ -61,6 +63,10 @@ def load_sources():
             if address and (address.is_link_local or address.is_unspecified or address.is_multicast):
                 raise ValueError("Link-local, multicast and unspecified source addresses are disallowed")
             endpoint["url"] = endpoint["url"].rstrip("/")
+            mode_key = kind, url.scheme, url.hostname, url.port or (443 if url.scheme == "https" else 80)
+            scoped = p.get("teamScoped", False)
+            if endpoint_modes.setdefault(mode_key, scoped) != scoped:
+                raise ValueError("A shared source origin cannot also be configured without a team selector")
             if "secretFile" in endpoint:
                 if url.scheme != "https":
                     raise ValueError("A source using a credential requires HTTPS")
@@ -104,10 +110,18 @@ def timestamp():
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
-def target(service, environment):
+def target(service, environment, *, profile=None, team=None):
     if not all(isinstance(v, str) and LABEL.fullmatch(v) for v in (service, environment)):
         abort(400, "service 和 environment 必须为 1–80 位 ASCII 标签")
-    return {"service": service, "environment": environment}
+    labels = {"service": service, "environment": environment}
+    scoped = profile is not None and profile.get("teamScoped", False)
+    if scoped:
+        if not isinstance(team, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", team):
+            abort(422, "共享数据源需要有效的团队范围")
+        labels["team"] = team
+    elif team is not None:
+        abort(422, "数据源未配置团队范围")
+    return labels
 
 
 def selector(labels):
@@ -258,7 +272,7 @@ def read_view(kind, profile, labels, start, end):
 
 
 def observe(profile, body):
-    labels = target(body.get("service"), body.get("environment"))
+    labels = target(body.get("service"), body.get("environment"), profile=profile, team=body.get("team"))
     start, end = seconds(body.get("windowStart")), seconds(body.get("windowEnd"))
     # Both APIs share millisecond resolution, including the evidence and recorded query.
     start = start.replace(microsecond=start.microsecond // 1000 * 1000)
@@ -291,6 +305,7 @@ def observe(profile, body):
         state = "complete" if all(v["status"] == "ok" and v["completeness"] == "complete"
                                   for v in views.values()) else "partial"
     return {"snapshotId": uuid4().hex, "sampledAt": sampled_at, "service": body["service"],
+            **({"team": labels["team"]} if "team" in labels else {}),
             "environment": body["environment"], "sourceId": profile["id"], "requestedRange": requested,
             "effectiveRange": effective, "windowStart": views["metrics"]["windowStart"],
             "windowEnd": views["metrics"]["windowEnd"], "completeness": state, "observations": views,

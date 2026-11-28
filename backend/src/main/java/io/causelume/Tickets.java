@@ -13,7 +13,11 @@ import org.springframework.web.bind.annotation.*;
 class Tickets {
     final Store store;
     private final Notifications notifications;
-    Tickets(Store store,Notifications notifications) { this.store=store; this.notifications=notifications; }
+    private final TeamAccess access;
+    private final Collaborations collaborations;
+    Tickets(Store store,Notifications notifications,TeamAccess access,Collaborations collaborations) {
+        this.store=store; this.notifications=notifications; this.access=access; this.collaborations=collaborations;
+    }
 
     static final String COLUMNS="id,service_id,alert_id,title,status,assignee_id,version,created_at,review,priority,verification,impact,incident_started_at,incident_ended_at,cause,uncertainty";
     static final java.util.Set<String> PRIORITIES=java.util.Set.of("P1","P2","P3","P4");
@@ -21,11 +25,23 @@ class Tickets {
     record Postmortem(String impact,java.time.Instant startedAt,java.time.Instant endedAt,String cause,String uncertainty) {}
     record Action(Long version,String action,Long assigneeId,String note,String priority,String verification,Postmortem postmortem) {}
 
-    @GetMapping Object list() { return store.rows("select "+COLUMNS+" from tickets order by id desc limit 100"); }
+    @GetMapping Object list(@RequestParam(required=false) Long teamId,HttpServletRequest req) {
+        var scope=TeamAccess.scope(Access.actor(req),"s.team_id",teamId);
+        return store.rows("select "+COLUMNS+" from tickets where id in ("+
+            "select k.id from tickets k join services s on s.id=k.service_id where "+scope.sql()+") order by id desc limit 100",scope.with());
+    }
     @GetMapping("/{id}") @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
-    public Map<String,Object> detail(@PathVariable long id) {
+    public Map<String,Object> detail(@PathVariable long id,HttpServletRequest req) {
+        var actor=Access.actor(req);
+        if(!access.internal(actor,access.ticketTeam(id))) return collaborations.sharedTicket(actor,id);
+        return internalDetail(id);
+    }
+
+    private Map<String,Object> internalDetail(long id) {
         var row=store.one("select "+COLUMNS+" from tickets where id=?",id);
-        row.put("runbook",store.one("select runbook from services where id=?",row.get("serviceId")).get("runbook"));
+        var service=store.one("select runbook,team_id from services where id=?",row.get("serviceId"));
+        row.put("runbook",service.get("runbook"));
+        row.put("teamId",service.get("teamId"));
         row.put("timeline",store.rows("""
             select * from (select id,action,note,actor,created_at,outcome from timeline where ticket_id=? order by id desc limit 50) recent order by id
             """,id));
@@ -39,12 +55,15 @@ class Tickets {
         String title=Problem.text(input.title,200,"title");
         if(input.requestId==null) throw new Problem(400,"需要 requestId");
         String priority=input.priority==null ? "P3" : Problem.choice(input.priority,PRIORITIES,"priority");
+        long team=access.serviceTeam(input.serviceId);
+        access.writer(actor,team);
         var service=store.one("select active from services where id=? for update",input.serviceId);
         var prior=store.rows("select id,service_id,alert_id,title,created_priority from tickets where creator_id=? and request_id=?",actor.id(),input.requestId);
         if(!prior.isEmpty()) return replay(input,title,priority,prior.getFirst());
         if(!Boolean.TRUE.equals(service.get("active"))) throw new Problem(409,"服务已停用");
         if(input.alertId!=null) {
-            var alert=store.one("select service_id from alerts where id=?",input.alertId);
+            var alert=store.one("select a.service_id,s.team_id from alerts a join services s on s.id=a.service_id where a.id=?",input.alertId);
+            access.requireTeam(actor,(long)alert.get("teamId"));
             if(!Objects.equals(alert.get("serviceId"),input.serviceId)) throw new Problem(400,"告警属于其他服务");
         }
         long id;
@@ -57,18 +76,20 @@ class Tickets {
             return replay(input,title,priority,matches.getFirst());
         }
         record(id,"CREATE",title,actor,null);
-        return detail(id);
+        return internalDetail(id);
     }
 
     private Map<String,Object> replay(NewTicket input,String title,String priority,Map<String,Object> old) {
         if(!Objects.equals(old.get("serviceId"),input.serviceId) || !Objects.equals(old.get("alertId"),input.alertId) || !title.equals(old.get("title")) || !priority.equals(old.get("createdPriority")))
             throw new Problem(409,"同一 requestId 的请求内容冲突");
-        return detail((long)old.get("id"));
+        return internalDetail((long)old.get("id"));
     }
 
     @PostMapping("/{id}/actions") @Transactional
     public Object action(@PathVariable long id,@RequestBody Action input,HttpServletRequest req) {
         var actor=Access.actor(req);
+        long team=access.ticketTeam(id);
+        access.ticketMutation(actor,id,team);
         var ticket=store.one("select status,assignee_id,version,priority,verification from tickets where id=?",id);
         if(input.version==null || input.version<0) throw new Problem(400,"需要有效的工单版本");
         if(!input.version.equals(ticket.get("version"))) throw new Problem(409,"工单已更新，请刷新");
@@ -77,20 +98,20 @@ class Tickets {
         String action=Problem.text(input.action,16,"action");
         String note=Problem.text(input.note,action.equals("REASSIGN") ? 1800 : 2000,"note");
         String priority=(String)ticket.get("priority"), verification=(String)ticket.get("verification");
-        if(!action.equals("ASSIGN") && !action.equals("NOTE") && !actor.role().equals("ADMIN") && !Objects.equals(assignee,actor.id()))
+        if(!action.equals("ASSIGN") && !action.equals("NOTE") && !access.manager(actor,team) && !Objects.equals(assignee,actor.id()))
             throw new Problem(403,"需要工单负责人或管理员权限");
         String next=switch(action) {
             case "ASSIGN","REASSIGN" -> {
-                actor.admin();
+                access.requireManager(actor,team);
                 boolean handover=action.equals("REASSIGN");
                 if(handover ? !status.equals("PROCESSING") && !status.equals("VERIFIED") : !status.equals("OPEN") && !status.equals("ASSIGNED"))
                     throw new Problem(409,"当前状态不能执行此派工动作");
                 if(input.assigneeId==null) throw new Problem(400,"请选择负责人");
-                var nextOwner=store.one("select username from accounts where id=? and active=true for update",input.assigneeId);
+                var nextOwner=access.assignee(team,input.assigneeId);
                 if(handover){
                     if(input.assigneeId.equals(assignee)) throw new Problem(400,"请选择另一位负责人");
-                    var previousOwner=store.one("select username from accounts where id=?",assignee);
-                    note="负责人 "+previousOwner.get("username")+" → "+nextOwner.get("username")+"\n交接说明："+note;
+                    String previousOwner=assignee==null?"待分派":(String)store.one("select username from accounts where id=?",assignee).get("username");
+                    note="负责人 "+previousOwner+" → "+nextOwner.get("username")+"\n交接说明："+note;
                 }
                 assignee=input.assigneeId;
                 yield handover ? status : "ASSIGNED";
@@ -108,7 +129,10 @@ class Tickets {
             }
             case "REOPEN" -> {
                 verification=null;
-                boolean staffed=!store.rows("select id from accounts where id=? and active=true",assignee).isEmpty();
+                boolean staffed=!store.rows("""
+                    select a.id from accounts a join team_members m on m.account_id=a.id
+                    where a.id=? and a.active=true and m.team_id=?
+                    """,assignee,team).isEmpty();
                 if(!staffed) assignee=null;
                 yield transition(status,"CLOSED",staffed?"PROCESSING":"OPEN");
             }
@@ -134,7 +158,7 @@ class Tickets {
             notifications.notifyTicket(id,action,"工单 #"+id+" 已转派给你，请查看交接说明");
         else if(action.equals("ASSIGN") || action.equals("CLOSE"))
             notifications.notifyTicket(id,action,action.equals("ASSIGN") ? "工单 #"+id+" 已派给你" : "工单 #"+id+" 已关闭");
-        return detail(id);
+        return internalDetail(id);
     }
 
     private String transition(String current,String required,String next) {

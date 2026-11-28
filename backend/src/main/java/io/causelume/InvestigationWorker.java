@@ -45,7 +45,7 @@ class InvestigationWorker {
               error='调查超期，最终结果未确认',finished_at=current_timestamp
             where status='RUNNING' and current_timestamp >= deadline_at""");
         var jobs = store.rows("""
-            select t.id,s.name,t.source_id,t.service_label,t.environment,t.window_start,t.window_end from tasks t join tickets k on k.id=t.ticket_id
+            select t.id,s.name,t.source_id,t.service_label,t.environment,t.window_start,t.window_end,t.team_label from tasks t join tickets k on k.id=t.ticket_id
             join services s on s.id=k.service_id where t.status='PENDING' order by t.id fetch first 1 row only""");
         if (jobs.isEmpty()) return;
         var job = jobs.getFirst();
@@ -98,6 +98,7 @@ class InvestigationWorker {
         body.put("allowModel",!store.rows("select task_id from model_reservations where task_id=? and state='HELD'",Long.parseLong(id)).isEmpty());
         body.put("service",job.get("serviceLabel")==null ? job.get("name") : job.get("serviceLabel"));
         if(job.get("sourceId")!=null) {
+            if(job.get("teamLabel")!=null) body.put("team",job.get("teamLabel"));
             body.put("sourceId",job.get("sourceId"));
             body.put("environment",job.get("environment"));
             body.put("windowStart",job.get("windowStart"));

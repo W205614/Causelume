@@ -49,13 +49,15 @@ CREATE ROLE causelume_migrator LOGIN PASSWORD '{env["APP_MIGRATOR_PASSWORD"]}';
 CREATE ROLE causelume_app LOGIN PASSWORD '{env["APP_DB_PASSWORD"]}';
 CREATE DATABASE auth_contract OWNER causelume_migrator;
 CREATE DATABASE storage_contract OWNER causelume_migrator;
+CREATE DATABASE team_contract OWNER causelume_migrator;
+CREATE DATABASE team_import_contract OWNER causelume_migrator;
 """
         def sql(database, statements):
             run("docker", "exec", "-i", name, "psql", "-q", "-U", "postgres", "-d", database,
                 "-v", "ON_ERROR_STOP=1", input=statements)
 
         sql("postgres", setup)
-        for db in ("auth_contract", "storage_contract"):
+        for db in ("auth_contract", "storage_contract", "team_contract", "team_import_contract"):
             sql(db, """REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE causelume_migrator IN SCHEMA public
  GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO causelume_app;
@@ -63,6 +65,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE causelume_migrator IN SCHEMA public
  GRANT USAGE,SELECT ON SEQUENCES TO causelume_app;""")
         env["APP_DB_URL"] = f"jdbc:postgresql://127.0.0.1:{port}/storage_contract"
         env["TEST_PG_APP_URL"] = f"jdbc:postgresql://127.0.0.1:{port}/auth_contract"
+        env["TEST_PG_TEAM_URL"] = f"jdbc:postgresql://127.0.0.1:{port}/team_contract"
+        env["TEST_PG_TEAM_IMPORT_URL"] = f"jdbc:postgresql://127.0.0.1:{port}/team_import_contract"
         root = Path(__file__).resolve().parents[1]
         run(args.maven, "-B", "-ntp", "-f", str(root / "backend/pom.xml"), "-Dtest=Postgres*IT", "test", env=env)
     finally:

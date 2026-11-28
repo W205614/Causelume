@@ -1,5 +1,6 @@
 import { productAction, notificationsPage, budgetPage, recoveryPage } from "./product.js";
 import { accountPage, accountAction, clearAccountSecrets } from "./account.js";
+import { teamsPage, collaborationPage, teamAction } from "./teams.js";
 import { demo, request as apiRequest, exportTicket } from "./api.js";
 import {
   esc,
@@ -25,6 +26,8 @@ let me,
   data,
   ticket,
   task,
+  activeTeam,
+  teams = [],
   epoch = 0,
   session = 0;
 
@@ -32,6 +35,8 @@ function endSession() {
   session++;
   clearAccountSecrets();
   me = data = ticket = task = null;
+  activeTeam = null;
+  teams = [];
   if (dialog.open) dialog.close();
   dialog.replaceChildren();
   document.querySelectorAll(".write-notice").forEach(notice => notice.remove());
@@ -87,7 +92,8 @@ function shell(page) {
     brand +
     '<nav aria-label="主导航">' +
     Object.entries(pages)
-      .filter(([key]) => (!["budget", "recovery"].includes(key) || me.role === "ADMIN") && (!me.enrollmentRequired || key === "account"))
+      .filter(([key]) => (!["budget", "recovery"].includes(key) || me.role === "ADMIN") &&
+        (!demo || !["teams", "collaboration"].includes(key)) && (!me.enrollmentRequired || key === "account"))
       .map(
         ([key, title]) =>
           '<a href="#' +
@@ -113,7 +119,10 @@ function shell(page) {
     '</div><main><div class="progress">正在加载…</div></main></div></div>';
 }
 async function loadView(page, id, params) {
-  const state = { admin: me.role === "ADMIN", actorId: me.id, params };
+  const state = { admin: me.role === "ADMIN", actorId: me.id, params, teams,
+    managers: new Set(teams.filter(t => t.teamRole === "MANAGER").map(t => t.id)),
+    teamNames: new Map(teams.map(t => [t.id, t.name])) };
+  const scoped = (path, team = activeTeam) => team ? path + "?teamId=" + team : path;
   if (page === "account") return { ...state, me };
   if (page === "notifications") return { ...state, notifications: await request("/notifications" + (params.size ? "?" + params : "")) };
   if (page === "budget") return { ...state, budget: await request("/budget") };
@@ -122,11 +131,11 @@ async function loadView(page, id, params) {
     request("/" + name + "/page?" + params.toString());
   switch (page) {
     case "overview":
-      return { ...state, summary: await request("/overview") };
+      return { ...state, summary: await request(scoped("/overview")) };
     case "improvements":
       return { ...state, page: await list("improvements") };
     case "services": {
-      const services = await request("/services");
+      const services = await request(id ? "/services" : scoped("/services"));
       if (!id) return { ...state, services };
       const service = services.find((s) => String(s.id) === id);
       if (!service) throw Error("服务不存在");
@@ -140,19 +149,23 @@ async function loadView(page, id, params) {
     case "alerts": {
       const [page, services] = await Promise.all([
         list("alerts"),
-        request("/services"),
+        request(scoped("/services")),
       ]);
       return { ...state, page, services, alerts: page.items };
     }
     case "tickets": {
-      const [services, users] = await Promise.all([
-        request("/services"),
-        request("/users"),
-      ]);
-      if (!id)
-        return { ...state, services, users, page: await list("tickets") };
-      const [ticket, related] = await Promise.all([
-        request("/tickets/" + encodeURIComponent(id)),
+      if (!id) {
+        const [services, users, result] = await Promise.all([
+          request(scoped("/services")), request(scoped("/users")), list("tickets"),
+        ]);
+        return { ...state, services, users, page: result };
+      }
+      const ticket = await request("/tickets/" + encodeURIComponent(id));
+      if (ticket.collaboration) return { ...state, shared: ticket };
+      const managesTicket = state.managers.has(ticket.teamId);
+      const [services, users, invites, related] = await Promise.all([
+        request(scoped("/services", ticket.teamId)), request(scoped("/users", ticket.teamId)),
+        !demo && (state.admin || managesTicket || ticket.assigneeId === me.id) ? request("/tickets/" + id + "/invites") : null,
         request("/tasks/page?ticketId=" + encodeURIComponent(id) + "&size=20"),
       ]);
       if (params.has("timelinePage")) {
@@ -166,13 +179,15 @@ async function loadView(page, id, params) {
         ticket,
         tasks: related.items,
         relatedTotal: related.total,
+        managesTicket,
+        invites,
       };
     }
     case "tasks": {
       if (!id) {
         const [page, services] = await Promise.all([
           list("tasks"),
-          request("/services"),
+          request(scoped("/services")),
         ]);
         return { ...state, page, services };
       }
@@ -182,11 +197,19 @@ async function loadView(page, id, params) {
     }
     case "users": {
       const [users, audit] = await Promise.all([
-        request("/users"),
+        request(scoped("/users")),
         !demo && state.admin ? request("/audit") : null,
       ]);
       return { ...state, users, audit };
     }
+    case "teams": {
+      const team = teams.find(t => String(t.id) === id);
+      const members = team ? { team, items: await request("/teams/" + team.id + "/members") } : null;
+      return { ...state, members };
+    }
+    case "collaboration":
+      return id ? { ...state, shared: await request("/collaborations/" + encodeURIComponent(id)) } :
+        { ...state, collaborations: await request("/collaborations") };
     default:
       throw Error("页面不存在");
   }
@@ -247,6 +270,24 @@ async function render() {
   shell(page);
   const main = root.querySelector("main");
   try {
+    if (!demo && !me.enrollmentRequired) {
+      const currentTeams = await request("/teams");
+      if (epoch !== version) return;
+      teams = currentTeams;
+      if (activeTeam && !teams.some(t => t.id === activeTeam)) activeTeam = null;
+      if (teams.length > 1 || activeTeam) {
+        const bar = root.querySelector(".bar");
+        bar.insertAdjacentHTML("beforeend", select("teamScope", "当前团队",
+          [["", "全部可见团队"], ...teams.map(t => [t.id, t.name])], activeTeam ?? "").replace("<select required", "<select"));
+        bar.querySelector("[name=teamScope]").onchange = (e) => {
+          activeTeam = Number(e.target.value) || null;
+          if (["tickets", "tasks", "services", "alerts"].includes(page) && query) location.hash = raw;
+          else void render();
+        };
+      }
+      if (activeTeam && ["alerts", "tickets", "tasks", "improvements"].includes(page))
+        params.set("teamId", activeTeam);
+    }
     const fresh = await loadView(page, id, params);
     if (epoch !== version) return;
     data = fresh;
@@ -264,8 +305,10 @@ async function render() {
       tickets: ticketsPage,
       tasks: tasksPage,
       users: usersPage,
+      teams: teamsPage,
+      collaboration: collaborationPage,
     };
-    main.innerHTML = ticket
+    main.innerHTML = data.shared ? collaborationPage(data) : ticket
       ? detail(ticket, data)
       : task
         ? taskDetail(task, data)
@@ -447,6 +490,8 @@ root.onclick = async (e) => {
     return;
   }
   try {
+    if (await teamAction(op, arg, { form, input, select, area, request, data, ticket, isCurrent: () => epoch === actionEpoch }))
+      return;
     if (await productAction(op, arg, { form, input, request, data, ticket, me, render,
       isCurrent: () => epoch === actionEpoch,
       refreshMe: async () => { me = await request("/me"); }
@@ -472,7 +517,7 @@ root.onclick = async (e) => {
     select(
       "serviceId",
       "关联服务",
-      data.services.map((s) => [s.id, s.name]),
+      data.services.map((s) => [s.id, s.name + (data.teamNames?.size > 1 ? " · " + data.teamNames.get(s.teamId) : "")]),
       chosen,
     );
   if (op === "newTicket" || op === "fromAlert") {
@@ -565,16 +610,18 @@ root.onclick = async (e) => {
       },
     );
   }
-  if (op === "newService")
+  if (op === "newService") {
+    const choices = teams.filter(t => data.admin || t.teamRole === "MANAGER").map(t => [t.id, t.name]);
     form(
       "添加服务",
       input("name", "服务标识") +
         input("description", "服务说明") +
-        input("resource", "关联资源"),
+        input("resource", "关联资源") + (choices.length ? select("teamId", "归属团队", choices, activeTeam) : ""),
       async (f) => {
-        await request("/services", f);
+        await request("/services", { ...f, ...(f.teamId ? { teamId: Number(f.teamId) } : {}) });
       },
     );
+  }
   if (op === "newUser")
     form(
       "添加用户",
@@ -583,9 +630,9 @@ root.onclick = async (e) => {
         select("role", "角色", [
           ["OPERATOR", "运维人员"],
           ["ADMIN", "管理员"],
-        ]),
+        ]) + (teams.length > 1 ? select("teamId", "归属团队", teams.map(t => [t.id, t.name]), activeTeam) : ""),
       async (f) => {
-        await request("/users", f);
+        await request("/users", { ...f, ...(f.teamId ? { teamId: Number(f.teamId) } : {}) });
       },
     );
   if (op === "newAlert")

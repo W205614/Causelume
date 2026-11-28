@@ -30,20 +30,18 @@ class BrowseTest {
         assertEquals(second, browse.tickets(1, 1, null, null, null, "#" + second).items().getFirst().get("id"));
         assertEquals(1, browse.tickets(1, 20, null, null, null, "%").total());
         assertTrue(browse.tickets(3, 1, null, 1L, null, null).items().isEmpty());
-        var linked = browse.alerts(1, 1, "CRITICAL", 1L).items().getFirst();
+        var linked = browse.alerts(1, 1, "CRITICAL", 1L,null,request()).items().getFirst();
         assertEquals(first, linked.get("ticketId"));
         assertEquals("checkout", linked.get("serviceName"));
 
         store.insert("insert into tasks(ticket_id,creator_id,request_id,status) values (?,1,?,'PENDING')", first, UUID.randomUUID());
         store.insert("insert into tasks(ticket_id,creator_id,request_id,status,summary,analysis) values (?,1,?,'SUCCEEDED',?,?)",
             second, UUID.randomUUID(), "saved summary", "{\"evidence\":[]}");
-        var item = browse.tasks(1, 1, "SUCCEEDED", second, 1L).items().getFirst();
+        var item = browse.tasks(1, 1, "SUCCEEDED", second, 1L,null,request()).items().getFirst();
         assertEquals("saved summary", item.get("summary"));
         assertFalse(item.containsKey("analysis"));
         assertFalse(item.containsKey("result"));
-        var request=new MockHttpServletRequest();
-        request.setAttribute("currentActor",new Actor(1L,"admin","ADMIN",null,false,false,0));
-        var overview = browse.overview(request);
+        var overview = browse.overview(null,request());
         assertEquals(3L, overview.get("openTickets"));
         assertEquals(1L, overview.get("activeTasks"));
         assertEquals(1L, ((Map<?,?>)overview.get("taskCounts")).get("PENDING"));
@@ -51,9 +49,15 @@ class BrowseTest {
 
     @Test void invalidFiltersAndPageSizesFailAtTheBoundary() {
         assertThrows(Problem.class, () -> browse.tickets(1, 101, null, null, null, null));
-        assertThrows(Problem.class, () -> browse.alerts(0, 20, "CRITICAL", null));
-        assertThrows(Problem.class, () -> browse.tasks(1, 20, "WRONG", null, null));
+        assertThrows(Problem.class, () -> browse.alerts(0, 20, "CRITICAL", null,null,request()));
+        assertThrows(Problem.class, () -> browse.tasks(1, 20, "WRONG", null, null,null,request()));
         assertThrows(Problem.class, () -> browse.tickets(1, 20, null, -1L, null, null));
+    }
+
+    private MockHttpServletRequest request() {
+        var request=new MockHttpServletRequest();
+        request.setAttribute("currentActor",new Actor(1L,"admin","ADMIN",null,false,false,0));
+        return request;
     }
 
     private long ticket(String title, long service, Long alert) {

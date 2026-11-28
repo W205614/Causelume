@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from e2e import Client
+from verify_teams import exercise as exercise_teams
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,8 @@ AM = "prom/alertmanager@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad7
 MAIL = "axllent/mailpit@sha256:9b3a463be15354c0f0eba91697d80e3e0d8a5623ef0e627cacc836bc17fd5231"
 RUNTIME = "eclipse-temurin:21-jre-jammy@sha256:1eac8b8fee11ca7d6725a48bc5d41992ed1561504ebae25490d2d062847e8269"
 CADDY = "caddy:2.11.9-alpine@sha256:71d41fe4b1ae92a058abc87afe614178b996d8a6b96d0f4c71ae30606e5927e3"
+V9_APP = "ghcr.io/w205614/causelume-app@sha256:208e871f0fd10ebdbd903bc244c9196271d74b11da45a12db21c891a5036ef17"
+V9_AGENT = "ghcr.io/w205614/causelume-agent@sha256:39c3115ed9c29035261888ed4e8fdc1966adcda68576568b07f99a792d710af7"
 
 
 def wait_for(label, read, matches=bool, timeout=90):
@@ -52,7 +55,7 @@ def enrolled(app, name, password):
     digest = hmac.digest(base64.b32decode(seed), (int(time.time()) // 30).to_bytes(8, "big"), "sha1")
     offset = digest[-1] & 15
     code = (int.from_bytes(digest[offset:offset+4], "big") & 0x7fffffff) % 1000000
-    client.call("/api/account/mfa/confirm", {"code": f"{code:06d}"})
+    client.recovery_code = client.call("/api/account/mfa/confirm", {"code": f"{code:06d}"})["recoveryCodes"][0]
     assert client.call("/api/me")["mfaEnabled"]
     return client
 
@@ -136,6 +139,7 @@ def exercise(origin, keys, management_token):
     assert report["ticket"]["status"] == "CLOSED" and report["ticket"]["cause"] == review["cause"]
     assert report["investigations"][0]["id"] == task["id"] and report["timeline"]
     print("PASS recovery signal, human verification, structured review, closure and authorized export", flush=True)
+    return admin
 
 
 def assert_http_status(req, status):
@@ -147,7 +151,7 @@ def assert_http_status(req, status):
     assert actual == status, (req.full_url, status, actual)
 
 
-def manifest(root, jar, runtime, agent_runtime, backup_image, keys):
+def manifest(root, jar, runtime, agent_runtime, backup_image, keys, app_image=None, agent_image=None, pre_upgrade=False):
     def bind(path, target):
         return {"type": "bind", "source": str(path.resolve()), "target": target, "read_only": True}
 
@@ -160,17 +164,29 @@ def manifest(root, jar, runtime, agent_runtime, backup_image, keys):
         path.write_text(value, encoding="ascii")
         files[name] = {"file": str(path)}
     source = root / "sources.json"
-    source.write_text(json.dumps([{"id": "prom-loki", "name": "Candidate",
-                      "prometheus": {"url": "http://query-gateway:9090"}, "loki": {"url": "http://query-gateway:3100"}}]))
+    source.write_text(json.dumps([{"id": "prom-loki", "name": "Candidate", **({} if pre_upgrade else {"teamScoped": True}),
+        "prometheus": {"url": "http://query-gateway:9090"}, "loki": {"url": "http://query-gateway:3100"}}]))
+    alloy = root / "alloy-teams.conf"
+    alloy.write_text((OBS / "config.alloy").read_text().replace(
+        '"service" = "example-service", "environment" = "local"',
+        '"service" = "example-service", "environment" = "local", "team" = "default"'))
+    registry = root / "alertmanager-teams.json"
+    registry.write_text(json.dumps([{"id": team, "team": team, "token": keys["ALERTMANAGER_" + team.upper() + "_TOKEN"]}
+                                    for team in ("alpha", "beta")]))
     alert = root / "alertmanager.yml"
     alert.write_text("""route:
   receiver: unused
+  group_by: [alertname, team]
   routes:
     - receiver: candidate
       matchers: ['alertname="CandidateFailure"']
       group_wait: 0s
       group_interval: 1s
-receivers:
+""" + "".join(f"""    - receiver: {team}
+      matchers: ['alertname="TeamContract"', 'team="{team}"']
+      group_wait: 0s
+      group_interval: 1s
+""" for team in ("alpha", "beta")) + """receivers:
   - name: unused
   - name: candidate
     webhook_configs:
@@ -179,11 +195,20 @@ receivers:
         http_config:
           authorization:
             credentials_file: /run/secrets/ALERTMANAGER_TOKEN
-""")
+""" + "".join(f"""  - name: {team}
+    webhook_configs:
+      - url: http://app:8080/api/integrations/alertmanager/{team}
+        send_resolved: true
+        http_config:
+          authorization:
+            credentials_file: /run/secrets/ALERTMANAGER_{team.upper()}_TOKEN
+""" for team in ("alpha", "beta")))
     agent = node(environment={"AGENT_MODE": "offline", "BIND_HOST": "0.0.0.0", "SOURCE_REGISTRY_FILE": "/sources.json",
                               "AGENT_TOKEN_FILE": "/run/secrets/AGENT_TOKEN"}, secrets=["AGENT_TOKEN"],
-                 volumes=[bind(source, "/sources.json")])
-    if agent_runtime:
+                 volumes=[bind(source, "/sources.json")], ports=["127.0.0.1::8091"])
+    if agent_image:
+        agent.update(image=agent_image)
+    elif agent_runtime:
         agent.update(image=agent_runtime, entrypoint=["python", "/candidate/investigator.py"])
         agent["volumes"].append(bind(ROOT / "agent", "/candidate"))
     else:
@@ -202,54 +227,83 @@ receivers:
         backup["image"] = backup_image
     else:
         backup["build"] = {"context": str(ROOT / "deployment/backup")}
+    app_runtime = app_image or runtime
+    app_jar = "/app/server.jar" if app_image else "/candidate.jar"
+    app_mount = [] if app_image else [bind(jar, app_jar)]
     return {"secrets": files, "volumes": {v: {} for v in ("repository", "backup-work", "restored")}, "services": {
         "backup": backup,
         "restore-postgres": node(image="postgres:18-alpine", tmpfs=["/var/lib/postgresql"], profiles=["recovery"],
                                  secrets=dbkeys, volumes=[roles], environment=db_environment, healthcheck=db_health),
         "query-gateway": node(image=CADDY, ports=["127.0.0.1::9090"],
                               volumes=[bind(ROOT / "deployment/caddy/query.Caddyfile", "/etc/caddy/Caddyfile")]),
+        "alloy": {"volumes": [bind(alloy, "/etc/alloy/config.alloy")]},
         "postgres": node(image="postgres:18-alpine", tmpfs=["/var/lib/postgresql"], secrets=dbkeys,
                          environment=db_environment,
                          volumes=[roles],
                          healthcheck=db_health),
         "agent": agent,
-        "migrate": node(image=runtime, entrypoint=["java", "-jar", "/candidate.jar", "storage", "migrate-pg"],
-                        volumes=[bind(jar, "/candidate.jar")], secrets=["APP_MIGRATOR_PASSWORD"],
+        "migrate": node(image=app_runtime, entrypoint=["java", "-jar", app_jar, "storage", "migrate-pg"],
+                        volumes=app_mount, secrets=["APP_MIGRATOR_PASSWORD"],
                         environment={"APP_DB_URL":"jdbc:postgresql://postgres:5432/causelume"},
                         depends_on={"postgres":{"condition":"service_healthy"}}),
-        "app": node(image=runtime, entrypoint=["java", "-jar", "/candidate.jar"], volumes=[bind(jar, "/candidate.jar")],
-                    secrets=[k for k in keys if k not in ("POSTGRES_PASSWORD", "RESTIC_PASSWORD", "APP_MIGRATOR_PASSWORD")] + ["MANAGEMENT_TOKEN"],
+        "app": node(image=app_runtime, entrypoint=["java", "-jar", app_jar],
+                    volumes=[*app_mount, bind(registry, "/alertmanager-teams.json")],
+                    secrets=["APP_DB_PASSWORD", "APP_ADMIN_PASSWORD", "APP_OPERATOR_PASSWORD", "APP_MFA_KEY", "AGENT_TOKEN",
+                             "ALERTMANAGER_TOKEN", "MANAGEMENT_TOKEN"],
                     ports=["127.0.0.1::8080", "127.0.0.1::9091"],
                     depends_on={"postgres":{"condition":"service_healthy"},"migrate":{"condition":"service_completed_successfully"}},
                     environment={"SPRING_PROFILES_ACTIVE":"prod", "APP_DB_URL":"jdbc:postgresql://postgres:5432/causelume",
                                  "APP_DB_USER":"causelume_app", "SPRING_FLYWAY_ENABLED":"false", "AGENT_URL":"http://agent:8091", "AGENT_MODE":"offline",
                                  "MANAGEMENT_SERVER_PORT":"9091", "SPRING_MAIL_HOST":"mail", "SPRING_MAIL_PORT":"1025",
-                                 "APP_SMTP_FROM":"candidate@example.invalid"}),
+                                 "APP_SMTP_FROM":"candidate@example.invalid", "ALERTMANAGER_REGISTRY_FILE":"/alertmanager-teams.json"}),
         "alertmanager": node(image=AM, volumes=[bind(alert, "/etc/alertmanager/alertmanager.yml")],
                              command=["--config.file=/etc/alertmanager/alertmanager.yml", "--cluster.listen-address="],
-                             secrets=["ALERTMANAGER_TOKEN"], ports=["127.0.0.1::9093"]),
+                             secrets=["ALERTMANAGER_TOKEN", "ALERTMANAGER_ALPHA_TOKEN", "ALERTMANAGER_BETA_TOKEN"], ports=["127.0.0.1::9093"]),
         "mail": node(image=MAIL, ports=["127.0.0.1::8025"])}}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--jar", type=Path, default=ROOT / "backend/target/causelume-1.1.1.jar")
+    parser.add_argument("--jar", type=Path, default=ROOT / "backend/target/causelume-1.2.0.jar")
     parser.add_argument("--runtime-image", default=RUNTIME, help="Java 21 runtime image. The mounted JAR supplies the application.")
     parser.add_argument("--agent-runtime", help="existing Python image with agent requirements; mount current source code")
+    parser.add_argument("--app-image", help="run the application from a locally available OCI candidate or published reference")
+    parser.add_argument("--agent-image", help="run the investigator from a locally available OCI candidate or published reference")
+    parser.add_argument("--browser", action="store_true", help="include the real console using the installed Playwright browser")
+    parser.add_argument("--v9-recovery", action="store_true", help="restore an encrypted v1.1.1 PostgreSQL backup and read it using the v1.1.1 image")
     parser.add_argument("--backup-image", help="prebuilt image from deployment/backup; defaults to building the source")
     args = parser.parse_args()
-    if not args.jar.is_file():
+    if args.v9_recovery:
+        args.app_image, args.agent_image = V9_APP, V9_AGENT
+    if not args.app_image and not args.jar.is_file():
         parser.error("build the candidate with mvn -f backend/pom.xml package first")
     project = "causelume-candidate-" + uuid4().hex[:12]
     keys = {k: secrets.token_hex(24) for k in ("POSTGRES_PASSWORD", "APP_DB_PASSWORD", "APP_MIGRATOR_PASSWORD",
-            "APP_ADMIN_PASSWORD", "APP_OPERATOR_PASSWORD", "AGENT_TOKEN", "ALERTMANAGER_TOKEN", "RESTIC_PASSWORD")}
+            "APP_ADMIN_PASSWORD", "APP_OPERATOR_PASSWORD", "AGENT_TOKEN", "ALERTMANAGER_TOKEN", "ALERTMANAGER_ALPHA_TOKEN",
+            "ALERTMANAGER_BETA_TOKEN", "RESTIC_PASSWORD")}
     keys["APP_MFA_KEY"] = base64.b64encode(secrets.token_bytes(32)).decode()
     with tempfile.TemporaryDirectory(prefix=project) as directory:
         root = Path(directory)
         overlay = root / "candidate.json"
-        overlay.write_text(json.dumps(manifest(root, args.jar, args.runtime_image, args.agent_runtime, args.backup_image, keys)))
+        config = manifest(root, args.jar, args.runtime_image, args.agent_runtime, args.backup_image, keys,
+                          args.app_image, args.agent_image, args.v9_recovery)
+        if args.v9_recovery:
+            app = config["services"]["app"]
+            config["services"]["restored-app"] = {**app, "profiles": ["recovery"], "ports": ["127.0.0.1::8080"],
+                "depends_on": {"restore-postgres": {"condition": "service_healthy"}},
+                "environment": {**app["environment"], "APP_DB_URL": "jdbc:postgresql://restore-postgres:5432/causelume"}}
+        overlay.write_text(json.dumps(config))
         prom = root / "prometheus.yml"
-        prom.write_text((OBS / "prometheus.yml").read_text().replace("10s", "1s").replace("4s", "900ms"))
+        prom.write_text((OBS / "prometheus.yml").read_text().replace("10s", "1s").replace("4s", "900ms").replace(
+            "service: example-service, environment: local", "service: example-service, environment: local, team: default") + """
+  - job_name: team-contract
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["example-service:8085"]
+        labels: {service: team-twin, environment: prod, team: alpha}
+      - targets: ["example-service:18085"]
+        labels: {service: team-twin, environment: prod, team: beta}
+""")
         env = {**os.environ, "CONTRACT_PROM_CONFIG": prom.as_posix(), "CONTRACT_MANAGEMENT_TOKEN": secrets.token_hex(24)}
         cmd = ["docker", "compose", "--env-file", os.devnull, "-p", project,
                "-f", str(OBS / "contract-compose.yml"), "-f", str(overlay)]
@@ -281,7 +335,8 @@ def main():
                     'exec psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U causelume_app -d causelume -c "$1"',
                     "check-privileges", sql)
 
-        print(f"Candidate JAR SHA256 {hashlib.sha256(args.jar.read_bytes()).hexdigest()}", flush=True)
+        print(f"Candidate app image {args.app_image}" if args.app_image else
+              f"Candidate JAR SHA256 {hashlib.sha256(args.jar.read_bytes()).hexdigest()}", flush=True)
         try:
             compose("up", "-d")
             rights = compose("exec", "-T", "postgres", "psql", "-U", "causelume_owner", "-d", "causelume", "-Atc",
@@ -292,7 +347,14 @@ def main():
             compose("exec", "-T", "app", "sh", "-ec", "test ! -e /run/secrets/APP_MIGRATOR_PASSWORD")
             assert "Offline storage operation completed." in compose("logs", "migrate"), "dedicated migration did not complete"
             assert_runtime_permissions("postgres")
-            exercise(lambda service, port: "http://" + compose("port", service, str(port)), keys, env["CONTRACT_MANAGEMENT_TOKEN"])
+            def origin(service, port):
+                return "http://" + compose("port", service, str(port))
+            admin = exercise(origin, keys, env["CONTRACT_MANAGEMENT_TOKEN"])
+            if not args.v9_recovery:
+                invite = exercise_teams(origin, admin, keys, enrolled, wait_for, ROOT / "frontend/tests/live-teams.mjs" if args.browser else None)
+                status = compose("exec", "-T", "postgres", "psql", "-U", "causelume_owner", "-d", "causelume", "-Atc",
+                                 f"select mail_status from notifications where invite_id={int(invite)}")
+                assert status == "CANCELLED", status
             compose("up", "-d", "--wait", "restore-postgres")
             if not args.backup_image:
                 compose("build", "backup")
@@ -313,7 +375,21 @@ def main():
                                "(select count(*) from tickets where status='CLOSED' and cause='Explicitly injected example fault') "
                                "from pg_class where oid='public.tickets'::regclass")
             assert restored == "causelume_migrator|t|1", "restored ownership, runtime privileges or incident data differ"
-            print("PASS production backup and restore scripts, encrypted local repository, configuration, seven counts and closed incident", flush=True)
+            if args.v9_recovery:
+                schema = compose("exec", "-T", "restore-postgres", "psql", "-U", "causelume_owner", "-d", "causelume", "-Atc",
+                                 "select version from flyway_schema_history order by installed_rank desc limit 1")
+                assert schema == "9", schema
+                compose("up", "-d", "restored-app")
+                old = Client(origin("restored-app", 8080))
+                wait_for("restored v1.1.1 image", lambda: ready(old.base + "/api/health"))
+                old.call("/api/login", {"username": "admin", "password": keys["APP_ADMIN_PASSWORD"], "code": admin.recovery_code})
+                assert old.call("/api/tickets/page?status=CLOSED")["total"] == 1
+                print("PASS encrypted V9 PostgreSQL restore and authenticated read-back using v1.1.1", flush=True)
+            else:
+                status = compose("exec", "-T", "restore-postgres", "psql", "-U", "causelume_owner", "-d", "causelume", "-Atc",
+                                 f"select mail_status from notifications where invite_id={int(invite)}")
+                assert status == "CANCELLED", status
+                print("PASS encrypted V10 restore includes closed incident and revoked collaboration", flush=True)
         finally:
             compose("--profile", "recovery", "down", "--volumes", "--remove-orphans", "--rmi", "local")
 

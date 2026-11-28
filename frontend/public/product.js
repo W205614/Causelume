@@ -35,7 +35,7 @@ export function notificationsPage(data) {
       esc(n.eventType) + " · " + (n.readAt ? "已读" : "未读"),
       '<p>' + esc(n.message) + '</p><p>' + date(n.createdAt) + ' · 邮件状态 ' + esc(n.mailStatus) +
       ' · 尝试 ' + esc(n.attempts) + ' 次</p>' + (n.lastError ? '<p role="alert">' + esc(n.lastError) + '</p>' : "") +
-      '<a href="#tickets/' + n.ticketId + '">查看关联工单</a> ' +
+      '<a href="#' + (n.inviteId ? 'collaboration' : 'tickets') + '/' + n.ticketId + '">查看关联工单</a> ' +
       (!n.readAt && (!delivery || n.recipientId === data.actorId) ? button("notificationRead:" + n.id, "标记已读") : "") +
       (data.admin && ["FAILED", "UNKNOWN"].includes(n.mailStatus) ? button("notificationResend:" + n.id, "人工重发邮件") : "")
     )).join("") : '<p class="empty">暂无通知</p>') +
@@ -65,18 +65,25 @@ export async function productAction(op, arg, context) {
       values => request("/budget/" + arg + "/reconcile", { ...values, actualCostUsd: Number(values.actualCostUsd) }).then(() => "budget"));
   } else if (op === "serviceEdit") {
     let service = data.services.find(s => s.id === Number(arg));
-    const sources = await request("/sources");
-    const users = await request("/users");
+    const [sources, users] = await Promise.all([
+      data.admin ? request("/sources") : { sources: [] },
+      request("/users" + (service.teamId ? "?teamId=" + service.teamId : "")),
+    ]);
     if (!context.isCurrent()) return true;
     form("编辑服务",
       field("name", "服务名称", service.name, "text", true) + field("description", "描述", service.description) +
-      field("resource", "资源标识", service.resource, "text", true) + field("environment", "环境", service.environment || "default", "text", true) +
-      field("serviceLabel", "观测服务标签", service.serviceLabel || service.name) +
+      field("resource", "资源标识", service.resource, "text", true) +
+      (data.admin || !service.sourceId ? field("environment", "环境", service.environment || "default", "text", true) : "") +
+      (data.admin ? field("serviceLabel", "观测服务标签", service.serviceLabel || service.name) : "") +
       field("runbook", "运行手册链接", service.runbook || "", "url") +
-      select("sourceId", "批准的数据源", [["", "未接入"], ...(sources.sources || sources).map(s => [s.id, s.name])], service.sourceId) +
+      (data.admin ? select("sourceId", "批准的数据源", [["", "未接入"], ...(sources.sources || sources).map(s => [s.id, s.name])], service.sourceId) : "") +
+      (data.admin && service.sourceId && service.sourceId !== "checkout-demo" ?
+        '<label><input type="checkbox" name="rebindSource"> 按当前目录重新绑定数据源</label>' : "") +
       select("ownerId", "默认负责人", [["", "未指定"], ...users.filter(u => u.active !== false).map(u => [u.id, u.username])], service.ownerId) +
       select("active", "服务状态", [["true", "启用"], ["false", "停用"]], service.active !== false),
-      values => request("/services/" + arg, { ...values, active: values.active === "true", ownerId: values.ownerId ? Number(values.ownerId) : null, sourceId: values.sourceId || null, version: service.version || 0 }).then(() => "services"),
+      values => request("/services/" + arg, { ...values, ...(values.rebindSource === "on" ? { rebindSource: true } : {}),
+        active: values.active === "true", ownerId: values.ownerId ? Number(values.ownerId) : null, sourceId: values.sourceId || null,
+        version: service.version || 0 }).then(() => "services"),
       async editor => {
         const latest = (await request("/services")).find(s => s.id === service.id);
         if (!latest) throw Error("服务已不存在。");
