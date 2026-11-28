@@ -25,8 +25,9 @@ def exercise(origin, admin, keys, enrolled, wait_for, browser_script):
         payload = {"name": "Same service", "description": "Twin service used for isolation", "resource": "example",
                    "teamId": team["id"]}
         service = actor.call("/api/services", payload)
-        settings = {**payload, "ownerId": account["id"], "environment": "prod", "active": True,
-                    "sourceId": "prom-loki", "serviceLabel": "team-twin", "version": 0}
+        settings = {k: payload[k] for k in ("name", "description", "resource")}
+        settings.update({"ownerId": account["id"], "environment": "prod", "active": True,
+                         "sourceId": "prom-loki", "serviceLabel": "team-twin", "version": 0})
         admin.call(f"/api/services/{service['id']}", settings)
         teams[key] = (team, actor, service, settings)
 

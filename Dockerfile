@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.m2 mvn -q -f backend/pom.xml -Dmaven.test.s
 FROM eclipse-temurin:21-jre-alpine-3.24@sha256:ac05c3c42b7c2f1a52c9bd52f01041fa1958231b15ebeae7420429cbc5baf474
 # Keep fixes from Alpine 3.24 that postdate the pinned base image.
 RUN apk add --no-cache --upgrade zlib=1.4-r0 openssl=3.5.9-r1 libcrypto3=3.5.9-r1 libssl3=3.5.9-r1 \
-    gnutls=3.8.14-r0 libfontenc=1.1.10-r0
+    gnutls=3.8.14-r0 libfontenc=1.1.10-r0 libexpat=2.11.0-r0
 WORKDIR /app
 # Preserve the numeric identity that owns existing H2 volumes.
 RUN mkdir /app/data && chown 999:999 /app/data
